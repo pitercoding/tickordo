@@ -1,0 +1,156 @@
+# ==========================================
+# Environment variables & secrets
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Go
+# ==========================================
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# Build output
+/bin/
+/build/
+/dist/
+
+# ==========================================
+# Next.js
+# ==========================================
+
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Vercel
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+
+# ==========================================
+# Frontend tooling
+# ==========================================
+
+# ESLint cache
+.eslintcache
+
+# Prettier cache
+.prettier-cache
+
+# Turbo
+.turbo/
+
+# ==========================================
+# PostgreSQL / databases
+# ==========================================
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# PostgreSQL local data
+postgres-data/
+
+# ==========================================
+# Docker
+# ==========================================
+
+# Docker environment files
+docker.env
+
+# ==========================================
+# AI / ML
+# ==========================================
+
+# Local AI model files
+models/
+
+# Large model/data files
+*.bin
+*.safetensors
+*.gguf
+
+# AI experiment outputs
+ai-output/
+ai-cache/
+
+# ==========================================
+# Logs
+# ==========================================
+
+*.log
+logs/
+
+# ==========================================
+# OS generated files
+# ==========================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ==========================================
+# IDE / Editor
+# ==========================================
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# JetBrains
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+
+# ==========================================
+# Temporary files
+# ==========================================
+
+tmp/
+temp/
+*.tmp
+*.temp
+
+# ==========================================
+# Test / generated artifacts
+# ==========================================
+
+test-results/
+playwright-report/
+blob-report/
