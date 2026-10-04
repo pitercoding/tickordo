@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: tickordo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tickordo
+      POSTGRES_USER: tickordo
+      POSTGRES_PASSWORD: tickordo
+    ports:
+      - "5433:5432"
+    volumes:
+      - tickordo-postgres-data:/var/lib/postgresql
+
+volumes:
+  tickordo-postgres-data:
