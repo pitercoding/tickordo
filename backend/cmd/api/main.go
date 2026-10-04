@@ -4,22 +4,23 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/pitercoding/tickordo/internal/config"
 	"github.com/pitercoding/tickordo/internal/routes"
 )
 
 func main() {
-	const address = ":8080"
+	cfg := config.Load()
 
 	mux := http.NewServeMux()
 
 	routes.RegisterRoutes(mux)
 
 	server := &http.Server{
-		Addr:    address,
+		Addr:    ":" + cfg.Port,
 		Handler: mux,
 	}
 
-	fmt.Printf("Tickordo API running on http://localhost%s\n", address)
+	fmt.Printf("Tickordo API running on http://localhost:%s\n", cfg.Port)
 
 	if err := server.ListenAndServe(); err != nil {
 		fmt.Printf("server stopped: %v\n", err)
