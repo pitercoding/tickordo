@@ -86,7 +86,7 @@ docker.env
 # ==========================================
 
 # Local AI model files
-models/
+/models/
 
 # Large model/data files
 *.bin
