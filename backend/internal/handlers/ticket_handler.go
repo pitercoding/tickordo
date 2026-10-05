@@ -29,11 +29,6 @@ type createTicketRequest struct {
 }
 
 func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var request createTicketRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -77,5 +72,28 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := w.Write(response); err != nil {
 		log.Printf("failed to write ticket response: %v", err)
+	}
+}
+
+func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
+	tickets, err := h.service.ListTickets(r.Context())
+	if err != nil {
+		log.Printf("failed to list tickets: %v", err)
+		http.Error(w, "failed to list tickets", http.StatusInternalServerError)
+		return
+	}
+
+	response, err := json.Marshal(tickets)
+	if err != nil {
+		log.Printf("failed to marshal tickets response: %v", err)
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if _, err := w.Write(response); err != nil {
+		log.Printf("failed to write tickets response: %v", err)
 	}
 }

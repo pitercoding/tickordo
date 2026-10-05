@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/pitercoding/tickordo/internal/models"
@@ -35,4 +36,15 @@ func (s *TicketService) CreateTicket(
 	}
 
 	return ticket, nil
+}
+
+func (s *TicketService) ListTickets(
+	ctx context.Context,
+) ([]models.Ticket, error) {
+	tickets, err := s.repository.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tickets: %w", err)
+	}
+
+	return tickets, nil
 }
