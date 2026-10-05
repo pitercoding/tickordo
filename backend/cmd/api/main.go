@@ -8,7 +8,10 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/pitercoding/tickordo/internal/config"
 	"github.com/pitercoding/tickordo/internal/database"
+	"github.com/pitercoding/tickordo/internal/handlers"
+	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/routes"
+	"github.com/pitercoding/tickordo/internal/services"
 )
 
 func main() {
@@ -29,9 +32,13 @@ func main() {
 
 	fmt.Println("Database connection established")
 
+	ticketRepository := repositories.NewTicketRepository(db)
+	ticketService := services.NewTicketService(ticketRepository)
+	ticketHandler := handlers.NewTicketHandler(ticketService)
+
 	mux := http.NewServeMux()
 
-	routes.RegisterRoutes(mux)
+	routes.RegisterRoutes(mux, ticketHandler)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
