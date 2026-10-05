@@ -25,7 +25,7 @@ func main() {
 		fmt.Printf("failed to connect to database: %v\n", err)
 		return
 	}
-	defer db.Close(ctx)
+	defer db.Close()
 
 	fmt.Println("Database connection established")
 
