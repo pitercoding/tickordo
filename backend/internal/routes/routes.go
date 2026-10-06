@@ -14,4 +14,5 @@ func RegisterRoutes(
 	mux.HandleFunc("POST /tickets", ticketHandler.Create)
 	mux.HandleFunc("GET /tickets", ticketHandler.List)
 	mux.HandleFunc("GET /tickets/{id}", ticketHandler.GetByID)
+	mux.HandleFunc("PATCH /tickets/{id}", ticketHandler.UpdateStatus)
 }

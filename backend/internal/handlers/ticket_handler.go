@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/services"
 )
 
@@ -20,15 +20,19 @@ type TicketHandler struct {
 	service *services.TicketService
 }
 
+type createTicketRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type updateTicketStatusRequest struct {
+	Status string `json:"status"`
+}
+
 func NewTicketHandler(service *services.TicketService) *TicketHandler {
 	return &TicketHandler{
 		service: service,
 	}
-}
-
-type createTicketRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
 }
 
 func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +114,7 @@ func (h *TicketHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	ticket, err := h.service.GetTicketByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, repositories.ErrTicketNotFound) {
 			http.Error(w, "ticket not found", http.StatusNotFound)
 			return
 		}
@@ -133,4 +137,46 @@ func (h *TicketHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(response); err != nil {
 		log.Printf("failed to write ticket response: %v", err)
 	}
+}
+
+func (h *TicketHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid ticket id", http.StatusBadRequest)
+		return
+	}
+
+	var request updateTicketStatusRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	request.Status = strings.TrimSpace(request.Status)
+
+	switch request.Status {
+	case "open", "in_progress", "resolved":
+		// Valid status.
+	default:
+		http.Error(w, "invalid ticket status", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.service.UpdateTicketStatus(
+		r.Context(),
+		id,
+		request.Status,
+	); err != nil {
+		if errors.Is(err, repositories.ErrTicketNotFound) {
+			http.Error(w, "ticket not found", http.StatusNotFound)
+			return
+		}
+
+		log.Printf("failed to update ticket status: %v", err)
+		http.Error(w, "failed to update ticket status", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

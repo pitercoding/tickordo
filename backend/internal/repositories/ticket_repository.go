@@ -2,12 +2,17 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pitercoding/tickordo/internal/models"
 )
+
+// ErrTicketNotFound is returned when no ticket matches the given ID.
+var ErrTicketNotFound = errors.New("ticket not found")
 
 type TicketRepository struct {
 	db *pgxpool.Pool
@@ -123,8 +128,42 @@ func (r *TicketRepository) GetByID(
 	)
 
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTicketNotFound
+		}
+
 		return nil, fmt.Errorf("failed to get ticket: %w", err)
 	}
 
 	return &ticket, nil
+}
+
+func (r *TicketRepository) UpdateStatus(
+	ctx context.Context,
+	id uuid.UUID,
+	status string,
+) error {
+	query := `
+		UPDATE tickets
+		SET
+			status = $1,
+			updated_at = NOW()
+		WHERE id = $2
+	`
+
+	result, err := r.db.Exec(
+		ctx,
+		query,
+		status,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update ticket status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrTicketNotFound
+	}
+
+	return nil
 }

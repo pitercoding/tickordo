@@ -60,3 +60,15 @@ func (s *TicketService) GetTicketByID(
 
 	return ticket, nil
 }
+
+func (s *TicketService) UpdateTicketStatus(
+	ctx context.Context,
+	id uuid.UUID,
+	status string,
+) error {
+	if err := s.repository.UpdateStatus(ctx, id, status); err != nil {
+		return fmt.Errorf("failed to update ticket status: %w", err)
+	}
+
+	return nil
+}
