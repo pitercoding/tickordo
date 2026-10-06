@@ -48,3 +48,15 @@ func (s *TicketService) ListTickets(
 
 	return tickets, nil
 }
+
+func (s *TicketService) GetTicketByID(
+	ctx context.Context,
+	id uuid.UUID,
+) (*models.Ticket, error) {
+	ticket, err := s.repository.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ticket: %w", err)
+	}
+
+	return ticket, nil
+}

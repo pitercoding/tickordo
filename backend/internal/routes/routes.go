@@ -13,4 +13,5 @@ func RegisterRoutes(
 	mux.HandleFunc("GET /health", handlers.Health)
 	mux.HandleFunc("POST /tickets", ticketHandler.Create)
 	mux.HandleFunc("GET /tickets", ticketHandler.List)
+	mux.HandleFunc("GET /tickets/{id}", ticketHandler.GetByID)
 }

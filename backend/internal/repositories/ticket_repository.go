@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pitercoding/tickordo/internal/models"
 )
@@ -88,4 +89,42 @@ func (r *TicketRepository) List(ctx context.Context) ([]models.Ticket, error) {
 	}
 
 	return tickets, nil
+}
+
+func (r *TicketRepository) GetByID(
+	ctx context.Context,
+	id uuid.UUID,
+) (*models.Ticket, error) {
+	query := `
+        SELECT
+            id,
+            title,
+            description,
+            status,
+            created_at,
+            updated_at
+        FROM tickets
+        WHERE id = $1
+    `
+
+	var ticket models.Ticket
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		id,
+	).Scan(
+		&ticket.ID,
+		&ticket.Title,
+		&ticket.Description,
+		&ticket.Status,
+		&ticket.CreatedAt,
+		&ticket.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ticket: %w", err)
+	}
+
+	return &ticket, nil
 }
