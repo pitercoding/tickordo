@@ -54,3 +54,21 @@ func (s *TicketTriageService) AnalyzeTicket(
 
 	return triage, nil
 }
+
+func (s *TicketTriageService) ListTriagesByTicketID(
+	ctx context.Context,
+	ticketID uuid.UUID,
+) ([]*models.TicketTriage, error) {
+	// Verify that the ticket exists.
+	if _, err := s.ticketRepository.GetByID(ctx, ticketID); err != nil {
+		return nil, fmt.Errorf("failed to get ticket: %w", err)
+	}
+
+	// Load the ticket's triage history.
+	triages, err := s.triageRepository.ListByTicketID(ctx, ticketID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list ticket triages: %w", err)
+	}
+
+	return triages, nil
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pitercoding/tickordo/internal/models"
 )
@@ -59,4 +60,63 @@ func (r *TicketTriageRepository) Create(
 	}
 
 	return nil
+}
+
+func (r *TicketTriageRepository) ListByTicketID(
+	ctx context.Context,
+	ticketID uuid.UUID,
+) ([]*models.TicketTriage, error) {
+	query := `
+		SELECT
+			id,
+			ticket_id,
+			category,
+			priority,
+			sentiment,
+			suggested_team,
+			summary,
+			suggested_action,
+			confidence,
+			model,
+			created_at
+		FROM ticket_triages
+		WHERE ticket_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.Query(ctx, query, ticketID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list ticket triages: %w", err)
+	}
+	defer rows.Close()
+
+	triages := make([]*models.TicketTriage, 0)
+
+	for rows.Next() {
+		triage := &models.TicketTriage{}
+
+		if err := rows.Scan(
+			&triage.ID,
+			&triage.TicketID,
+			&triage.Category,
+			&triage.Priority,
+			&triage.Sentiment,
+			&triage.SuggestedTeam,
+			&triage.Summary,
+			&triage.SuggestedAction,
+			&triage.Confidence,
+			&triage.Model,
+			&triage.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan ticket triage: %w", err)
+		}
+
+		triages = append(triages, triage)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate ticket triages: %w", err)
+	}
+
+	return triages, nil
 }

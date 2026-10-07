@@ -20,6 +20,7 @@ func RegisterRoutes(
 	mux.HandleFunc("GET /tickets/{id}", ticketHandler.GetByID)
 	mux.HandleFunc("PATCH /tickets/{id}", ticketHandler.UpdateStatus)
 
-	// AI ticket triage endpoint.
+	// AI ticket triage endpoints.
 	mux.HandleFunc("POST /tickets/{id}/triage", ticketTriageHandler.Create)
+	mux.HandleFunc("GET /tickets/{id}/triages", ticketTriageHandler.List)
 }
