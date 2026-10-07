@@ -9,10 +9,17 @@ import (
 func RegisterRoutes(
 	mux *http.ServeMux,
 	ticketHandler *handlers.TicketHandler,
+	ticketTriageHandler *handlers.TicketTriageHandler,
 ) {
+	// Health check endpoint.
 	mux.HandleFunc("GET /health", handlers.Health)
+
+	// Ticket endpoints.
 	mux.HandleFunc("POST /tickets", ticketHandler.Create)
 	mux.HandleFunc("GET /tickets", ticketHandler.List)
 	mux.HandleFunc("GET /tickets/{id}", ticketHandler.GetByID)
 	mux.HandleFunc("PATCH /tickets/{id}", ticketHandler.UpdateStatus)
+
+	// AI ticket triage endpoint.
+	mux.HandleFunc("POST /tickets/{id}/triage", ticketTriageHandler.Create)
 }

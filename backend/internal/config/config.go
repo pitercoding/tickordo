@@ -3,8 +3,9 @@ package config
 import "os"
 
 type Config struct {
-	Port        string
-	DatabaseURL string
+	Port         string
+	DatabaseURL  string
+	OpenAIAPIKey string
 }
 
 func Load() Config {
@@ -15,7 +16,8 @@ func Load() Config {
 	}
 
 	return Config{
-		Port:        port,
-		DatabaseURL: os.Getenv("DATABASE_URL"),
+		Port:         port,
+		DatabaseURL:  os.Getenv("DATABASE_URL"),
+		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
 	}
 }
