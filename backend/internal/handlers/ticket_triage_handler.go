@@ -98,3 +98,45 @@ func (h *TicketTriageHandler) List(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to write ticket triages response: %v", err)
 	}
 }
+
+func (h *TicketTriageHandler) GetLatest(w http.ResponseWriter, r *http.Request) {
+	// Extract the ticket ID from the URL.
+	ticketID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid ticket ID", http.StatusBadRequest)
+		return
+	}
+
+	// Load the most recent triage for the ticket.
+	triage, err := h.service.GetLatestTriageByTicketID(r.Context(), ticketID)
+	if err != nil {
+		if errors.Is(err, repositories.ErrTicketNotFound) {
+			http.Error(w, "ticket not found", http.StatusNotFound)
+			return
+		}
+
+		if errors.Is(err, repositories.ErrTicketTriageNotFound) {
+			http.Error(w, "ticket triage not found", http.StatusNotFound)
+			return
+		}
+
+		log.Printf("failed to get latest ticket triage: %v", err)
+		http.Error(w, "failed to retrieve latest ticket triage", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert the response to JSON before writing the HTTP headers.
+	response, err := json.Marshal(triage)
+	if err != nil {
+		log.Printf("failed to marshal ticket triage: %v", err)
+		http.Error(w, "failed to retrieve latest ticket triage", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if _, err := w.Write(response); err != nil {
+		log.Printf("failed to write ticket triage response: %v", err)
+	}
+}

@@ -72,3 +72,21 @@ func (s *TicketTriageService) ListTriagesByTicketID(
 
 	return triages, nil
 }
+
+func (s *TicketTriageService) GetLatestTriageByTicketID(
+	ctx context.Context,
+	ticketID uuid.UUID,
+) (*models.TicketTriage, error) {
+	// Verify that the ticket exists.
+	if _, err := s.ticketRepository.GetByID(ctx, ticketID); err != nil {
+		return nil, fmt.Errorf("failed to get ticket: %w", err)
+	}
+
+	// Load the most recent triage for the ticket.
+	triage, err := s.triageRepository.GetLatestByTicketID(ctx, ticketID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest ticket triage: %w", err)
+	}
+
+	return triage, nil
+}

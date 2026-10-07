@@ -2,12 +2,17 @@ package repositories
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pitercoding/tickordo/internal/models"
 )
+
+// ErrTicketTriageNotFound is returned when a ticket has no triage results.
+var ErrTicketTriageNotFound = errors.New("ticket triage not found")
 
 type TicketTriageRepository struct {
 	db *pgxpool.Pool
@@ -119,4 +124,58 @@ func (r *TicketTriageRepository) ListByTicketID(
 	}
 
 	return triages, nil
+}
+
+func (r *TicketTriageRepository) GetLatestByTicketID(
+	ctx context.Context,
+	ticketID uuid.UUID,
+) (*models.TicketTriage, error) {
+	query := `
+		SELECT
+			id,
+			ticket_id,
+			category,
+			priority,
+			sentiment,
+			suggested_team,
+			summary,
+			suggested_action,
+			confidence,
+			model,
+			created_at
+		FROM ticket_triages
+		WHERE ticket_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+
+	triage := &models.TicketTriage{}
+
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		ticketID,
+	).Scan(
+		&triage.ID,
+		&triage.TicketID,
+		&triage.Category,
+		&triage.Priority,
+		&triage.Sentiment,
+		&triage.SuggestedTeam,
+		&triage.Summary,
+		&triage.SuggestedAction,
+		&triage.Confidence,
+		&triage.Model,
+		&triage.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTicketTriageNotFound
+		}
+
+		return nil, fmt.Errorf("failed to get latest ticket triage: %w", err)
+	}
+
+	return triage, nil
 }
