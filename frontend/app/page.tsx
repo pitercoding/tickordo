@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 
 import {
   TicketsTable,
@@ -19,9 +20,13 @@ export default function Home() {
             </p>
           </div>
 
-          <button className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700">
-            + New ticket
-          </button>
+          <Link
+            href="/tickets/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
+          >
+            <span aria-hidden="true">+</span>
+            New ticket
+          </Link>
         </header>
 
         <section className="py-8">

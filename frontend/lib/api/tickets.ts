@@ -9,6 +9,20 @@ export type Ticket = {
     updated_at: string;
 };
 
+export type CreateTicketRequest = {
+    title: string;
+    description: string;
+};
+
 export async function getTickets(): Promise<Ticket[]> {
     return apiClient<Ticket[]>("/tickets");
+}
+
+export async function createTicket(
+    data: CreateTicketRequest,
+): Promise<Ticket> {
+    return apiClient<Ticket>("/tickets", {
+        method: "POST",
+        body: JSON.stringify(data),
+    });
 }

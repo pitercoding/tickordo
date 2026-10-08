@@ -1,5 +1,15 @@
 const API_URL = "http://localhost:8080";
 
+export class ApiError extends Error {
+    constructor(
+        message: string,
+        public readonly status: number,
+    ) {
+        super(message);
+        this.name = "ApiError";
+    }
+}
+
 export async function apiClient<T>(
     endpoint: string,
     options?: RequestInit,
@@ -13,7 +23,14 @@ export async function apiClient<T>(
     });
 
     if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
+        // The API returns errors as { "error": "message" }.
+        const body = await response.json().catch(() => null);
+        const message =
+            typeof body?.error === "string"
+                ? body.error
+                : `API request failed with status ${response.status}`;
+
+        throw new ApiError(message, response.status);
     }
 
     return response.json();
