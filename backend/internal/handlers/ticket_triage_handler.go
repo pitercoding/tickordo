@@ -27,7 +27,7 @@ func (h *TicketTriageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Extract the ticket ID from the URL.
 	ticketID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "invalid ticket ID", http.StatusBadRequest)
+		writeError(w, "invalid ticket ID", http.StatusBadRequest)
 		return
 	}
 
@@ -35,12 +35,12 @@ func (h *TicketTriageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	triage, err := h.service.AnalyzeTicket(r.Context(), ticketID)
 	if err != nil {
 		if errors.Is(err, repositories.ErrTicketNotFound) {
-			http.Error(w, "ticket not found", http.StatusNotFound)
+			writeError(w, "ticket not found", http.StatusNotFound)
 			return
 		}
 
 		log.Printf("failed to triage ticket: %v", err)
-		http.Error(w, "failed to triage ticket", http.StatusInternalServerError)
+		writeError(w, "failed to triage ticket", http.StatusInternalServerError)
 		return
 	}
 
@@ -48,7 +48,7 @@ func (h *TicketTriageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	response, err := json.Marshal(triage)
 	if err != nil {
 		log.Printf("failed to marshal ticket triage response: %v", err)
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		writeError(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -65,7 +65,7 @@ func (h *TicketTriageHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Extract the ticket ID from the URL.
 	ticketID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "invalid ticket ID", http.StatusBadRequest)
+		writeError(w, "invalid ticket ID", http.StatusBadRequest)
 		return
 	}
 
@@ -73,12 +73,12 @@ func (h *TicketTriageHandler) List(w http.ResponseWriter, r *http.Request) {
 	triages, err := h.service.ListTriagesByTicketID(r.Context(), ticketID)
 	if err != nil {
 		if errors.Is(err, repositories.ErrTicketNotFound) {
-			http.Error(w, "ticket not found", http.StatusNotFound)
+			writeError(w, "ticket not found", http.StatusNotFound)
 			return
 		}
 
 		log.Printf("failed to list ticket triages: %v", err)
-		http.Error(w, "failed to retrieve ticket triage history", http.StatusInternalServerError)
+		writeError(w, "failed to retrieve ticket triage history", http.StatusInternalServerError)
 		return
 	}
 
@@ -86,7 +86,7 @@ func (h *TicketTriageHandler) List(w http.ResponseWriter, r *http.Request) {
 	response, err := json.Marshal(triages)
 	if err != nil {
 		log.Printf("failed to marshal ticket triages response: %v", err)
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		writeError(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *TicketTriageHandler) GetLatest(w http.ResponseWriter, r *http.Request) 
 	// Extract the ticket ID from the URL.
 	ticketID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "invalid ticket ID", http.StatusBadRequest)
+		writeError(w, "invalid ticket ID", http.StatusBadRequest)
 		return
 	}
 
@@ -111,17 +111,17 @@ func (h *TicketTriageHandler) GetLatest(w http.ResponseWriter, r *http.Request) 
 	triage, err := h.service.GetLatestTriageByTicketID(r.Context(), ticketID)
 	if err != nil {
 		if errors.Is(err, repositories.ErrTicketNotFound) {
-			http.Error(w, "ticket not found", http.StatusNotFound)
+			writeError(w, "ticket not found", http.StatusNotFound)
 			return
 		}
 
 		if errors.Is(err, repositories.ErrTicketTriageNotFound) {
-			http.Error(w, "ticket triage not found", http.StatusNotFound)
+			writeError(w, "ticket triage not found", http.StatusNotFound)
 			return
 		}
 
 		log.Printf("failed to get latest ticket triage: %v", err)
-		http.Error(w, "failed to retrieve latest ticket triage", http.StatusInternalServerError)
+		writeError(w, "failed to retrieve latest ticket triage", http.StatusInternalServerError)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *TicketTriageHandler) GetLatest(w http.ResponseWriter, r *http.Request) 
 	response, err := json.Marshal(triage)
 	if err != nil {
 		log.Printf("failed to marshal ticket triage: %v", err)
-		http.Error(w, "failed to retrieve latest ticket triage", http.StatusInternalServerError)
+		writeError(w, "failed to retrieve latest ticket triage", http.StatusInternalServerError)
 		return
 	}
 

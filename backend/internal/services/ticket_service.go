@@ -32,7 +32,7 @@ func (s *TicketService) CreateTicket(
 	}
 
 	if err := s.repository.Create(ctx, ticket); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create ticket: %w", err)
 	}
 
 	return ticket, nil

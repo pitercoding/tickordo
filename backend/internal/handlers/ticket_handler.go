@@ -13,8 +13,18 @@ import (
 	"github.com/pitercoding/tickordo/internal/services"
 )
 
-// maxTitleLength matches the VARCHAR(255) limit of tickets.title.
-const maxTitleLength = 255
+const (
+	// maxTitleLength matches the VARCHAR(255) limit of tickets.title.
+	maxTitleLength = 255
+
+	// maxDescriptionLength is an application rule (the column is TEXT): it
+	// keeps tickets readable and bounds what is sent to OpenAI for triage.
+	maxDescriptionLength = 5000
+
+	// maxRequestBodyBytes caps JSON request bodies so a client cannot send
+	// an arbitrarily large payload (1 MB).
+	maxRequestBodyBytes = 1 << 20
+)
 
 type TicketHandler struct {
 	service *services.TicketService
@@ -38,8 +48,10 @@ func NewTicketHandler(service *services.TicketService) *TicketHandler {
 func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var request createTicketRequest
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -47,12 +59,17 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	request.Description = strings.TrimSpace(request.Description)
 
 	if request.Title == "" || request.Description == "" {
-		http.Error(w, "title and description are required", http.StatusBadRequest)
+		writeError(w, "title and description are required", http.StatusBadRequest)
 		return
 	}
 
 	if utf8.RuneCountInString(request.Title) > maxTitleLength {
-		http.Error(w, "title must be at most 255 characters", http.StatusBadRequest)
+		writeError(w, "title must be at most 255 characters", http.StatusBadRequest)
+		return
+	}
+
+	if utf8.RuneCountInString(request.Description) > maxDescriptionLength {
+		writeError(w, "description must be at most 5000 characters", http.StatusBadRequest)
 		return
 	}
 
@@ -63,14 +80,14 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		log.Printf("failed to create ticket: %v", err)
-		http.Error(w, "failed to create ticket", http.StatusInternalServerError)
+		writeError(w, "failed to create ticket", http.StatusInternalServerError)
 		return
 	}
 
 	response, err := json.Marshal(ticket)
 	if err != nil {
 		log.Printf("failed to encode ticket response: %v", err)
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		writeError(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -86,14 +103,14 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 	tickets, err := h.service.ListTickets(r.Context())
 	if err != nil {
 		log.Printf("failed to list tickets: %v", err)
-		http.Error(w, "failed to list tickets", http.StatusInternalServerError)
+		writeError(w, "failed to list tickets", http.StatusInternalServerError)
 		return
 	}
 
 	response, err := json.Marshal(tickets)
 	if err != nil {
 		log.Printf("failed to marshal tickets response: %v", err)
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		writeError(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -108,26 +125,26 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *TicketHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "invalid ticket id", http.StatusBadRequest)
+		writeError(w, "invalid ticket ID", http.StatusBadRequest)
 		return
 	}
 
 	ticket, err := h.service.GetTicketByID(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, repositories.ErrTicketNotFound) {
-			http.Error(w, "ticket not found", http.StatusNotFound)
+			writeError(w, "ticket not found", http.StatusNotFound)
 			return
 		}
 
 		log.Printf("failed to get ticket: %v", err)
-		http.Error(w, "failed to get ticket", http.StatusInternalServerError)
+		writeError(w, "failed to get ticket", http.StatusInternalServerError)
 		return
 	}
 
 	response, err := json.Marshal(ticket)
 	if err != nil {
 		log.Printf("failed to marshal ticket response: %v", err)
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		writeError(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
 
@@ -142,14 +159,16 @@ func (h *TicketHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 func (h *TicketHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "invalid ticket id", http.StatusBadRequest)
+		writeError(w, "invalid ticket ID", http.StatusBadRequest)
 		return
 	}
 
 	var request updateTicketStatusRequest
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -159,7 +178,7 @@ func (h *TicketHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	case "open", "in_progress", "resolved":
 		// Valid status.
 	default:
-		http.Error(w, "invalid ticket status", http.StatusBadRequest)
+		writeError(w, "invalid ticket status", http.StatusBadRequest)
 		return
 	}
 
@@ -169,12 +188,12 @@ func (h *TicketHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		request.Status,
 	); err != nil {
 		if errors.Is(err, repositories.ErrTicketNotFound) {
-			http.Error(w, "ticket not found", http.StatusNotFound)
+			writeError(w, "ticket not found", http.StatusNotFound)
 			return
 		}
 
 		log.Printf("failed to update ticket status: %v", err)
-		http.Error(w, "failed to update ticket status", http.StatusInternalServerError)
+		writeError(w, "failed to update ticket status", http.StatusInternalServerError)
 		return
 	}
 

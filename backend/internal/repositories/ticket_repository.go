@@ -48,7 +48,11 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *models.Ticket) er
 		&ticket.UpdatedAt,
 	)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create ticket: %w", err)
+	}
+
+	return nil
 }
 
 func (r *TicketRepository) List(ctx context.Context) ([]models.Ticket, error) {

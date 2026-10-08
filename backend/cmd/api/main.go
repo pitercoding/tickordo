@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/pitercoding/tickordo/internal/ai"
@@ -15,33 +19,39 @@ import (
 	"github.com/pitercoding/tickordo/internal/services"
 )
 
+const (
+	// connectTimeout limits how long startup waits for PostgreSQL.
+	connectTimeout = 10 * time.Second
+
+	// shutdownTimeout is longer than the OpenAI analyze timeout so an
+	// in-flight triage can complete before the process exits.
+	shutdownTimeout = 70 * time.Second
+)
+
 func main() {
 	// Load environment variables from the .env file.
 	if err := godotenv.Load("../.env"); err != nil {
-		fmt.Printf("warning: .env file not loaded: %v\n", err)
+		log.Printf("warning: .env file not loaded: %v", err)
 	}
 
-	// Load the application configuration.
-	cfg := config.Load()
-
-	// Fail fast when the OpenAI API key is missing, since triage depends on it.
-	if cfg.OpenAIAPIKey == "" {
-		fmt.Println("missing required environment variable: OPENAI_API_KEY")
-		return
+	// Load the application configuration and fail fast when it is incomplete.
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	// Create a context for the application startup process.
-	ctx := context.Background()
+	// Bound the startup connection so an unreachable database cannot hang the app.
+	connectCtx, cancelConnect := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancelConnect()
 
 	// Connect to the PostgreSQL database.
-	db, err := database.Connect(ctx, cfg.DatabaseURL)
+	db, err := database.Connect(connectCtx, cfg.DatabaseURL)
 	if err != nil {
-		fmt.Printf("failed to connect to database: %v\n", err)
-		return
+		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
-	fmt.Println("Database connection established")
+	log.Println("Database connection established")
 
 	// Initialize the ticket repository.
 	ticketRepository := repositories.NewTicketRepository(db)
@@ -77,16 +87,46 @@ func main() {
 	// Register all application routes.
 	routes.RegisterRoutes(mux, ticketHandler, ticketTriageHandler)
 
-	// Configure the HTTP server.
+	// Configure the HTTP server with timeouts so slow clients cannot hold
+	// connections open forever. WriteTimeout must stay above the OpenAI
+	// analyze timeout, otherwise triage responses would be cut off.
 	server := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: mux,
+		Addr:              ":" + cfg.Port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      90 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	// Start the HTTP server.
-	fmt.Printf("Tickordo API running on http://localhost:%s\n", cfg.Port)
+	// Stop the server gracefully on Ctrl+C or SIGTERM (e.g. docker stop).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	if err := server.ListenAndServe(); err != nil {
-		fmt.Printf("server stopped: %v\n", err)
+	// Start the HTTP server in the background so main can wait for a signal.
+	serverErr := make(chan error, 1)
+
+	go func() {
+		log.Printf("Tickordo API running on http://localhost:%s", cfg.Port)
+		serverErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErr:
+		// ListenAndServe only returns here on failure (e.g. port already in use).
+		log.Fatalf("server failed: %v", err)
+	case <-ctx.Done():
+		log.Println("shutting down server...")
 	}
+
+	// Give in-flight requests (including OpenAI triage calls) time to finish.
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancelShutdown()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown failed: %v", err)
+		return
+	}
+
+	log.Println("server stopped")
 }
