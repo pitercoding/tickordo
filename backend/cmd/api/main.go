@@ -14,6 +14,7 @@ import (
 	"github.com/pitercoding/tickordo/internal/config"
 	"github.com/pitercoding/tickordo/internal/database"
 	"github.com/pitercoding/tickordo/internal/handlers"
+	"github.com/pitercoding/tickordo/internal/middleware"
 	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/routes"
 	"github.com/pitercoding/tickordo/internal/services"
@@ -92,7 +93,7 @@ func main() {
 	// analyze timeout, otherwise triage responses would be cut off.
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           mux,
+		Handler:           middleware.CORS(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      90 * time.Second,
