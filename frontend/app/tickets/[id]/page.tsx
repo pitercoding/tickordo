@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { getTicket } from "@/lib/api/tickets";
 import { ApiError } from "@/lib/api/client";
+import TicketTriagePanel from "@/components/tickets/ticket-triage";
 
 type TicketDetailsPageProps = {
     params: Promise<{ id: string }>;
@@ -101,6 +102,8 @@ async function TicketDetails({
                         </div>
                     </div>
                 </section>
+
+                <TicketTriagePanel ticketId={ticket.id} />
 
                 <div className="mt-6">
                     <Link
