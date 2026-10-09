@@ -1,4 +1,5 @@
 import { getTickets } from "@/lib/api/tickets";
+import Link from "next/link";
 
 export async function TicketsTable() {
   const tickets = await getTickets();
@@ -8,7 +9,13 @@ export async function TicketsTable() {
       {tickets.map((ticket) => (
         <tr key={ticket.id} className="transition hover:bg-slate-50">
           <td className="px-5 py-4">
-            <p className="text-sm font-medium text-slate-900">{ticket.title}</p>
+            <Link
+              href={`/tickets/${ticket.id}`}
+              className="text-sm font-medium text-slate-900 transition hover:text-blue-700"
+            >
+              {ticket.title}
+            </Link>
+
             <p className="mt-1 text-xs text-slate-500">{ticket.id}</p>
           </td>
 

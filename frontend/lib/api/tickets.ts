@@ -26,3 +26,7 @@ export async function createTicket(
         body: JSON.stringify(data),
     });
 }
+
+export async function getTicket(id: string): Promise<Ticket> {
+    return apiClient<Ticket>(`/tickets/${encodeURIComponent(id)}`);
+}
