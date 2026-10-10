@@ -8,11 +8,12 @@ export async function TicketsTable() {
 }
 
 export function TicketsTableSkeleton() {
-  // Mirrors the client layout (filters + table) to avoid a layout shift on load.
+  // Mirrors the client layout (filters + sort + table) to avoid a layout shift on load.
   return (
     <div className="animate-pulse space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="h-10 flex-1 rounded-lg bg-slate-100" />
+        <div className="h-10 rounded-lg bg-slate-100 sm:w-44" />
         <div className="h-10 rounded-lg bg-slate-100 sm:w-44" />
       </div>
 

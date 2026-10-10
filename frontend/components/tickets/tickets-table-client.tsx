@@ -25,6 +25,15 @@ const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: "resolved", label: statusLabels.resolved },
 ];
 
+type SortOption = "newest" | "oldest" | "title-asc" | "title-desc";
+
+const sortOptions: { value: SortOption; label: string }[] = [
+    { value: "newest", label: "Newest first" },
+    { value: "oldest", label: "Oldest first" },
+    { value: "title-asc", label: "Title A–Z" },
+    { value: "title-desc", label: "Title Z–A" },
+];
+
 export default function TicketsTableClient({
     tickets,
 }: TicketsTableClientProps) {
@@ -32,6 +41,7 @@ export default function TicketsTableClient({
     const [statusFilter, setStatusFilter] =
         useState<StatusFilter>("all");
     const [currentPage, setCurrentPage] = useState(1);
+    const [sortBy, setSortBy] = useState<SortOption>("newest");
 
     const filteredTickets = useMemo(() => {
         const normalizedSearch = search.trim().toLowerCase();
@@ -49,22 +59,48 @@ export default function TicketsTableClient({
         });
     }, [tickets, search, statusFilter]);
 
-    const totalPages = Math.ceil(filteredTickets.length / PAGE_SIZE);
+    const sortedTickets = useMemo(() => {
+        return [...filteredTickets].sort((a, b) => {
+            switch (sortBy) {
+                case "newest":
+                    return (
+                        new Date(b.created_at).getTime() -
+                        new Date(a.created_at).getTime()
+                    );
+
+                case "oldest":
+                    return (
+                        new Date(a.created_at).getTime() -
+                        new Date(b.created_at).getTime()
+                    );
+
+                case "title-asc":
+                    return a.title.localeCompare(b.title);
+
+                case "title-desc":
+                    return b.title.localeCompare(a.title);
+            }
+        });
+    }, [filteredTickets, sortBy]);
+
+    const totalPages = Math.ceil(sortedTickets.length / PAGE_SIZE);
 
     // Keep the page in range if the ticket list shrinks (e.g. after a refresh).
     const safeCurrentPage = Math.min(currentPage, Math.max(totalPages, 1));
 
     const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
-    const paginatedTickets = filteredTickets.slice(
+
+    const paginatedTickets = sortedTickets.slice(
         startIndex,
         startIndex + PAGE_SIZE,
     );
 
     const firstTicketNumber =
-        filteredTickets.length === 0 ? 0 : startIndex + 1;
+        sortedTickets.length === 0 ? 0 : startIndex + 1;
+
     const lastTicketNumber = Math.min(
         startIndex + PAGE_SIZE,
-        filteredTickets.length,
+        sortedTickets.length,
     );
 
     const hasTickets = tickets.length > 0;
@@ -111,6 +147,33 @@ export default function TicketsTableClient({
                         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:min-w-44"
                     >
                         {statusOptions.map((option) => (
+                            <option
+                                key={option.value}
+                                value={option.value}
+                            >
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label
+                        htmlFor="ticket-sort"
+                        className="sr-only"
+                    >
+                        Sort tickets
+                    </label>
+                    <select
+                        id="ticket-sort"
+                        value={sortBy}
+                        onChange={(event) => {
+                            setSortBy(event.target.value as SortOption);
+                            setCurrentPage(1);
+                        }}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:min-w-44"
+                    >
+                        {sortOptions.map((option) => (
                             <option
                                 key={option.value}
                                 value={option.value}
@@ -212,7 +275,7 @@ export default function TicketsTableClient({
                     aria-live="polite"
                 >
                     Showing {firstTicketNumber}–{lastTicketNumber} of{" "}
-                    {filteredTickets.length} filtered tickets
+                    {sortedTickets.length} filtered tickets
                     {" "}({tickets.length} total)
                 </p>
 
