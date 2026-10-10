@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import {
     analyzeTicket,
-    getLatestTicketTriage,
+    getTicketTriages,
     type TicketTriage as TicketTriageResult,
 } from "@/lib/api/triages";
 
@@ -26,20 +26,24 @@ function getTriageErrorMessage(
 export default function TicketTriagePanel({
     ticketId,
 }: TicketTriageProps) {
-    const [triage, setTriage] = useState<TicketTriageResult | null>(null);
+    const [triages, setTriages] = useState<TicketTriageResult[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // The API returns triages newest first: the first one is the latest analysis.
+    const triage = triages[0] ?? null;
+    const previousTriages = triages.slice(1);
+
     useEffect(() => {
         let cancelled = false;
 
-        async function loadLatestTriage() {
+        async function loadTriages() {
             try {
-                const result = await getLatestTicketTriage(ticketId);
+                const results = await getTicketTriages(ticketId);
 
                 if (!cancelled) {
-                    setTriage(result);
+                    setTriages(results);
                 }
             } catch (err) {
                 if (cancelled) {
@@ -47,7 +51,7 @@ export default function TicketTriagePanel({
                 }
 
                 if (err instanceof ApiError && err.status === 404) {
-                    setTriage(null);
+                    setTriages([]);
                 } else {
                     setError(
                         getTriageErrorMessage(
@@ -63,7 +67,7 @@ export default function TicketTriagePanel({
             }
         }
 
-        void loadLatestTriage();
+        void loadTriages();
 
         return () => {
             cancelled = true;
@@ -76,7 +80,11 @@ export default function TicketTriagePanel({
 
         try {
             const result = await analyzeTicket(ticketId);
-            setTriage(result);
+
+            setTriages((currentTriages) => [
+                result,
+                ...currentTriages.filter((item) => item.id !== result.id),
+            ]);
         } catch (err) {
             setError(
                 getTriageErrorMessage(
@@ -217,6 +225,92 @@ export default function TicketTriagePanel({
                             Confidence:{" "}
                             {Math.round(triage.confidence * 100)}%
                         </p>
+                    </div>
+                </div>
+            )}
+
+            {previousTriages.length > 0 && (
+                <div className="mt-8 border-t border-slate-200 pt-6">
+                    <h3 className="text-lg font-semibold text-slate-900">
+                        Previous analyses
+                    </h3>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                        Review previous AI-generated results for this ticket.
+                    </p>
+
+                    <div className="mt-4 space-y-3">
+                        {previousTriages.map((item) => (
+                            <details
+                                key={item.id}
+                                className="rounded-lg border border-slate-200 p-4"
+                            >
+                                <summary className="cursor-pointer list-inside text-sm font-medium text-slate-800">
+                                    <span className="capitalize">
+                                        {item.priority}
+                                    </span>
+                                    {" · "}
+                                    {item.category}
+                                    <span className="mt-1 block text-xs font-normal text-slate-500">
+                                        {new Date(item.created_at).toLocaleString(
+                                            "en-GB",
+                                        )}
+                                    </span>
+                                </summary>
+
+                                <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-slate-900">
+                                            Summary
+                                        </h4>
+                                        <p className="mt-1 text-sm leading-6 text-slate-700">
+                                            {item.summary}
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-slate-900">
+                                            Suggested action
+                                        </h4>
+                                        <p className="mt-1 text-sm leading-6 text-slate-700">
+                                            {item.suggested_action}
+                                        </p>
+                                    </div>
+
+                                    <div className="grid gap-3 text-sm sm:grid-cols-2">
+                                        <p className="text-slate-600">
+                                            <span className="font-medium text-slate-800">
+                                                Team:
+                                            </span>{" "}
+                                            {item.suggested_team}
+                                        </p>
+
+                                        <p className="text-slate-600">
+                                            <span className="font-medium text-slate-800">
+                                                Sentiment:
+                                            </span>{" "}
+                                            <span className="capitalize">
+                                                {item.sentiment}
+                                            </span>
+                                        </p>
+
+                                        <p className="text-slate-600">
+                                            <span className="font-medium text-slate-800">
+                                                Confidence:
+                                            </span>{" "}
+                                            {Math.round(item.confidence * 100)}%
+                                        </p>
+
+                                        <p className="text-slate-600">
+                                            <span className="font-medium text-slate-800">
+                                                Model:
+                                            </span>{" "}
+                                            {item.model}
+                                        </p>
+                                    </div>
+                                </div>
+                            </details>
+                        ))}
                     </div>
                 </div>
             )}
