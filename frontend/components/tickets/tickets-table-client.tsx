@@ -10,6 +10,8 @@ type TicketsTableClientProps = {
 
 type StatusFilter = "all" | TicketStatus;
 
+const PAGE_SIZE = 10;
+
 const statusLabels: Record<TicketStatus, string> = {
     open: "Open",
     in_progress: "In progress",
@@ -29,6 +31,7 @@ export default function TicketsTableClient({
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] =
         useState<StatusFilter>("all");
+    const [currentPage, setCurrentPage] = useState(1);
 
     const filteredTickets = useMemo(() => {
         const normalizedSearch = search.trim().toLowerCase();
@@ -45,6 +48,24 @@ export default function TicketsTableClient({
             return matchesTitle && matchesStatus;
         });
     }, [tickets, search, statusFilter]);
+
+    const totalPages = Math.ceil(filteredTickets.length / PAGE_SIZE);
+
+    // Keep the page in range if the ticket list shrinks (e.g. after a refresh).
+    const safeCurrentPage = Math.min(currentPage, Math.max(totalPages, 1));
+
+    const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+    const paginatedTickets = filteredTickets.slice(
+        startIndex,
+        startIndex + PAGE_SIZE,
+    );
+
+    const firstTicketNumber =
+        filteredTickets.length === 0 ? 0 : startIndex + 1;
+    const lastTicketNumber = Math.min(
+        startIndex + PAGE_SIZE,
+        filteredTickets.length,
+    );
 
     const hasTickets = tickets.length > 0;
 
@@ -63,9 +84,10 @@ export default function TicketsTableClient({
                         type="search"
                         placeholder="Search tickets by title..."
                         value={search}
-                        onChange={(event) =>
-                            setSearch(event.target.value)
-                        }
+                        onChange={(event) => {
+                            setSearch(event.target.value);
+                            setCurrentPage(1);
+                        }}
                         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
                     />
                 </div>
@@ -80,11 +102,12 @@ export default function TicketsTableClient({
                     <select
                         id="ticket-status-filter"
                         value={statusFilter}
-                        onChange={(event) =>
+                        onChange={(event) => {
                             setStatusFilter(
                                 event.target.value as StatusFilter,
-                            )
-                        }
+                            );
+                            setCurrentPage(1);
+                        }}
                         className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:min-w-44"
                     >
                         {statusOptions.map((option) => (
@@ -115,6 +138,7 @@ export default function TicketsTableClient({
                                 onClick={() => {
                                     setSearch("");
                                     setStatusFilter("all");
+                                    setCurrentPage(1);
                                 }}
                                 className="mt-4 text-sm font-medium text-blue-700 transition hover:text-blue-800"
                             >
@@ -150,7 +174,7 @@ export default function TicketsTableClient({
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredTickets.map((ticket) => (
+                                {paginatedTickets.map((ticket) => (
                                     <tr
                                         key={ticket.id}
                                         className="transition hover:bg-slate-50"
@@ -182,9 +206,49 @@ export default function TicketsTableClient({
                 </div>
             )}
 
-            <p className="text-xs text-slate-500" aria-live="polite">
-                Showing {filteredTickets.length} of {tickets.length} tickets
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p
+                    className="text-xs text-slate-500"
+                    aria-live="polite"
+                >
+                    Showing {firstTicketNumber}–{lastTicketNumber} of{" "}
+                    {filteredTickets.length} filtered tickets
+                    {" "}({tickets.length} total)
+                </p>
+
+                {totalPages > 1 && (
+                    <nav
+                        aria-label="Ticket pagination"
+                        className="flex items-center gap-3"
+                    >
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setCurrentPage(safeCurrentPage - 1)
+                            }
+                            disabled={safeCurrentPage === 1}
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Previous
+                        </button>
+
+                        <span className="text-sm text-slate-600">
+                            Page {safeCurrentPage} of {totalPages}
+                        </span>
+
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setCurrentPage(safeCurrentPage + 1)
+                            }
+                            disabled={safeCurrentPage === totalPages}
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Next
+                        </button>
+                    </nav>
+                )}
+            </div>
         </div>
     );
 }
