@@ -82,11 +82,20 @@ func main() {
 	// Initialize the ticket triage HTTP handler.
 	ticketTriageHandler := handlers.NewTicketTriageHandler(ticketTriageService)
 
+	// Initialize the dashboard repository.
+	dashboardRepository := repositories.NewDashboardRepository(db)
+
+	// Initialize the dashboard service.
+	dashboardService := services.NewDashboardService(dashboardRepository)
+
+	// Initialize the dashboard HTTP handler.
+	dashboardHandler := handlers.NewDashboardHandler(dashboardService)
+
 	// Create the HTTP router.
 	mux := http.NewServeMux()
 
 	// Register all application routes.
-	routes.RegisterRoutes(mux, ticketHandler, ticketTriageHandler)
+	routes.RegisterRoutes(mux, ticketHandler, ticketTriageHandler, dashboardHandler)
 
 	// Configure the HTTP server with timeouts so slow clients cannot hold
 	// connections open forever. WriteTimeout must stay above the OpenAI

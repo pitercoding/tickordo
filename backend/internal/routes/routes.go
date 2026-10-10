@@ -10,6 +10,7 @@ func RegisterRoutes(
 	mux *http.ServeMux,
 	ticketHandler *handlers.TicketHandler,
 	ticketTriageHandler *handlers.TicketTriageHandler,
+	dashboardHandler *handlers.DashboardHandler,
 ) {
 	// Health check endpoint.
 	mux.HandleFunc("GET /health", handlers.Health)
@@ -24,4 +25,7 @@ func RegisterRoutes(
 	mux.HandleFunc("POST /tickets/{id}/triage", ticketTriageHandler.Create)
 	mux.HandleFunc("GET /tickets/{id}/triages", ticketTriageHandler.List)
 	mux.HandleFunc("GET /tickets/{id}/triage", ticketTriageHandler.GetLatest)
+
+	// Dashboard endpoint.
+	mux.HandleFunc("GET /dashboard/stats", dashboardHandler.GetStats)
 }
