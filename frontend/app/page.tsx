@@ -6,6 +6,11 @@ import {
   TicketsTableSkeleton,
 } from "@/components/tickets/tickets-table";
 
+import {
+  DashboardStatsCards,
+  DashboardStatsSkeleton,
+} from "@/components/dashboard/dashboard-stats";
+
 export default function Home() {
   return (
     <main className="min-h-screen">
@@ -38,26 +43,9 @@ export default function Home() {
           </p>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <p className="text-sm font-medium text-slate-500">Open tickets</p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">24</p>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <p className="text-sm font-medium text-slate-500">
-              High priority
-            </p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">7</p>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <p className="text-sm font-medium text-slate-500">
-              AI analyzed
-            </p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">18</p>
-          </div>
-        </section>
+        <Suspense fallback={<DashboardStatsSkeleton />}>
+          <DashboardStatsCards />
+        </Suspense>
 
         <section className="mt-8">
           <div className="mb-4 flex items-center justify-between">
