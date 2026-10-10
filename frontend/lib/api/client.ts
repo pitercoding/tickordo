@@ -33,5 +33,10 @@ export async function apiClient<T>(
         throw new ApiError(message, response.status);
     }
 
+    // Some successful responses, such as HTTP 204, have no body.
+    if (response.status === 204) {
+        return undefined as T;
+    }
+
     return response.json();
 }

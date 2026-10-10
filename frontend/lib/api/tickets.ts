@@ -1,10 +1,12 @@
 import { apiClient } from "./client";
 
+export type TicketStatus = "open" | "in_progress" | "resolved";
+
 export type Ticket = {
     id: string;
     title: string;
     description: string;
-    status: string;
+    status: TicketStatus;
     created_at: string;
     updated_at: string;
 };
@@ -29,4 +31,14 @@ export async function createTicket(
 
 export async function getTicket(id: string): Promise<Ticket> {
     return apiClient<Ticket>(`/tickets/${encodeURIComponent(id)}`);
+}
+
+export async function updateTicketStatus(
+    id: string,
+    status: TicketStatus,
+): Promise<void> {
+    return apiClient<void>(`/tickets/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+    });
 }

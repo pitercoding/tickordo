@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getTicket } from "@/lib/api/tickets";
 import { ApiError } from "@/lib/api/client";
 import TicketTriagePanel from "@/components/tickets/ticket-triage";
+import TicketStatusSelector from "@/components/tickets/ticket-status-selector";
 
 type TicketDetailsPageProps = {
     params: Promise<{ id: string }>;
@@ -64,14 +65,10 @@ async function TicketDetails({
                 </div>
 
                 <section className="space-y-6 rounded-xl border border-slate-200 bg-white p-6">
-                    <div>
-                        <h2 className="text-sm font-medium text-slate-500">
-                            Status
-                        </h2>
-                        <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                            {ticket.status}
-                        </span>
-                    </div>
+                    <TicketStatusSelector
+                        ticketId={ticket.id}
+                        initialStatus={ticket.status}
+                    />
 
                     <div>
                         <h2 className="text-sm font-medium text-slate-500">
