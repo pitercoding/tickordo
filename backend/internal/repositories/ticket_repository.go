@@ -58,14 +58,25 @@ func (r *TicketRepository) Create(ctx context.Context, ticket *models.Ticket) er
 func (r *TicketRepository) List(ctx context.Context) ([]models.Ticket, error) {
 	query := `
 		SELECT
-			id,
-			title,
-			description,
-			status,
-			created_at,
-			updated_at
-		FROM tickets
-		ORDER BY created_at DESC
+			t.id,
+			t.title,
+			t.description,
+			t.status,
+			latest_triage.category,
+			latest_triage.priority,
+			t.created_at,
+			t.updated_at
+		FROM tickets AS t
+		LEFT JOIN LATERAL (
+			SELECT
+				category,
+				priority
+			FROM ticket_triages
+			WHERE ticket_id = t.id
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		) AS latest_triage ON TRUE
+		ORDER BY t.created_at DESC
 	`
 
 	rows, err := r.db.Query(ctx, query)
@@ -84,6 +95,8 @@ func (r *TicketRepository) List(ctx context.Context) ([]models.Ticket, error) {
 			&ticket.Title,
 			&ticket.Description,
 			&ticket.Status,
+			&ticket.LatestTriageCategory,
+			&ticket.LatestTriagePriority,
 			&ticket.CreatedAt,
 			&ticket.UpdatedAt,
 		); err != nil {
@@ -105,16 +118,27 @@ func (r *TicketRepository) GetByID(
 	id uuid.UUID,
 ) (*models.Ticket, error) {
 	query := `
-        SELECT
-            id,
-            title,
-            description,
-            status,
-            created_at,
-            updated_at
-        FROM tickets
-        WHERE id = $1
-    `
+		SELECT
+			t.id,
+			t.title,
+			t.description,
+			t.status,
+			latest_triage.category,
+			latest_triage.priority,
+			t.created_at,
+			t.updated_at
+		FROM tickets AS t
+		LEFT JOIN LATERAL (
+			SELECT
+				category,
+				priority
+			FROM ticket_triages
+			WHERE ticket_id = t.id
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		) AS latest_triage ON TRUE
+		WHERE t.id = $1
+	`
 
 	var ticket models.Ticket
 
@@ -127,6 +151,8 @@ func (r *TicketRepository) GetByID(
 		&ticket.Title,
 		&ticket.Description,
 		&ticket.Status,
+		&ticket.LatestTriageCategory,
+		&ticket.LatestTriagePriority,
 		&ticket.CreatedAt,
 		&ticket.UpdatedAt,
 	)
