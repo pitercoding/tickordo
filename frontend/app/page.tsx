@@ -56,20 +56,22 @@ export default function Home() {
           <NeedsAttention />
         </Suspense>
 
-        <section className="mt-8">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                Recent tickets
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Latest support requests and their current triage status.
-              </p>
-            </div>
-
-            <button className="text-sm font-medium text-slate-700 hover:text-slate-900">
-              View all
-            </button>
+        <section
+          id="recent-tickets"
+          tabIndex={-1}
+          aria-labelledby="recent-tickets-heading"
+          className="mt-8 scroll-mt-6 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-4"
+        >
+          <div className="mb-4">
+            <h2
+              id="recent-tickets-heading"
+              className="text-lg font-semibold text-slate-900"
+            >
+              Recent tickets
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Latest support requests and their current triage status.
+            </p>
           </div>
 
           <Suspense fallback={<TicketsTableSkeleton />}>

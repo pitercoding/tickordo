@@ -2,6 +2,8 @@ import Link from "next/link";
 
 import { getTickets, type Ticket, type TicketStatus } from "@/lib/api/tickets";
 
+import { ScrollToSectionLink } from "./scroll-to-section-link";
+
 const MAX_TICKETS = 5;
 
 // Only these priorities show up in the section; a lower rank is more urgent.
@@ -74,13 +76,22 @@ export async function NeedsAttention() {
 
     return (
         <section className="mt-8">
-            <div className="mb-4">
-                <h2 className="text-lg font-semibold text-slate-900">
-                    Needs attention
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                    Unresolved critical and high priority tickets, most urgent first.
-                </p>
+            <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                    <h2 className="text-lg font-semibold text-slate-900">
+                        Needs attention
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                        Unresolved critical and high priority tickets, most urgent first.
+                    </p>
+                </div>
+
+                <ScrollToSectionLink
+                    targetId="recent-tickets"
+                    className="shrink-0 text-sm font-medium text-slate-700 transition hover:text-slate-900"
+                >
+                    View all
+                </ScrollToSectionLink>
             </div>
 
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
