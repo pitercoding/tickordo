@@ -7,6 +7,8 @@ export type Ticket = {
     title: string;
     description: string;
     status: TicketStatus;
+    latest_triage_category: string | null;
+    latest_triage_priority: string | null;
     created_at: string;
     updated_at: string;
 };

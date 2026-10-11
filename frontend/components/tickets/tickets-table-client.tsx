@@ -25,6 +25,14 @@ const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: "resolved", label: statusLabels.resolved },
 ];
 
+// Badge colors for the priorities the AI analyzer can return.
+const priorityStyles: Record<string, string> = {
+    low: "bg-slate-100 text-slate-700",
+    medium: "bg-blue-100 text-blue-700",
+    high: "bg-amber-100 text-amber-800",
+    critical: "bg-red-100 text-red-700",
+};
+
 type SortOption = "newest" | "oldest" | "title-asc" | "title-desc";
 
 const sortOptions: { value: SortOption; label: string }[] = [
@@ -222,7 +230,7 @@ export default function TicketsTableClient({
             ) : (
                 <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-175">
+                        <table className="w-full min-w-225">
                             <thead className="border-b border-slate-200 bg-slate-50">
                                 <tr>
                                     <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -233,6 +241,12 @@ export default function TicketsTableClient({
                                     </th>
                                     <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
                                         Status
+                                    </th>
+                                    <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                                        Category
+                                    </th>
+                                    <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                                        Priority
                                     </th>
                                 </tr>
                             </thead>
@@ -260,6 +274,29 @@ export default function TicketsTableClient({
                                             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                                                 {statusLabels[ticket.status]}
                                             </span>
+                                        </td>
+                                        <td className="px-5 py-4 text-sm text-slate-600">
+                                            {ticket.latest_triage_category ?? (
+                                                <span className="whitespace-nowrap text-slate-400">
+                                                    Not analyzed
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-4">
+                                            {ticket.latest_triage_priority ? (
+                                                <span
+                                                    className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${
+                                                        priorityStyles[ticket.latest_triage_priority] ??
+                                                        priorityStyles.low
+                                                    }`}
+                                                >
+                                                    {ticket.latest_triage_priority}
+                                                </span>
+                                            ) : (
+                                                <span className="whitespace-nowrap text-sm text-slate-400">
+                                                    Not analyzed
+                                                </span>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
