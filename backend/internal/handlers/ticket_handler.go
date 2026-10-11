@@ -50,7 +50,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := decodeJSONBody(r.Body, &request); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -167,7 +167,7 @@ func (h *TicketHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	if err := decodeJSONBody(r.Body, &request); err != nil {
 		writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}

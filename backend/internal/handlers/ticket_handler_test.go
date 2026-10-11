@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,9 @@ var invalidTicketIDs = []struct {
 // gets past validation panics as soon as the handler calls the service.
 // serve turns that panic into a test failure, which is how these tests check
 // that invalid input is rejected before any service or database call.
+//
+// Any panic fails the test, not only one from the nil service, so the stack
+// trace is included to show where the handler actually panicked.
 func serve(t *testing.T, handler http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -42,7 +46,8 @@ func serve(t *testing.T, handler http.HandlerFunc, req *http.Request) *httptest.
 
 	defer func() {
 		if p := recover(); p != nil {
-			t.Fatalf("request reached the service layer (panic: %v); validation should have rejected it", p)
+			t.Fatalf("handler panicked (panic: %v); with a nil service this usually means "+
+				"validation let the request reach the service layer\n%s", p, debug.Stack())
 		}
 	}()
 
@@ -158,6 +163,56 @@ func TestTicketHandlerCreate_RejectsInvalidRequests(t *testing.T) {
 			wantMessage: invalidBody,
 		},
 
+		// Unknown fields. The known fields are valid, so without the
+		// unknown-field check these requests would reach the service.
+		{
+			name: "unknown field",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(`{"title": "Example", "description": "Example", "unexpected": "value"}`)
+			},
+			wantMessage: invalidBody,
+		},
+		{
+			name: "misspelled field",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(`{"title": "Example", "descripton": "Example"}`)
+			},
+			wantMessage: invalidBody,
+		},
+		{
+			name: "status is not accepted on create",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(`{"title": "Example", "description": "Example", "status": "resolved"}`)
+			},
+			wantMessage: invalidBody,
+		},
+
+		// Content after the first JSON value.
+		{
+			name:        "valid JSON followed by invalid text",
+			body:        func(t *testing.T) io.Reader { return strings.NewReader(createBody(t, "Example", "Example") + " lixo") },
+			wantMessage: invalidBody,
+		},
+		{
+			name: "two consecutive objects",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(createBody(t, "Example", "Example") + createBody(t, "Other", "Other"))
+			},
+			wantMessage: invalidBody,
+		},
+		{
+			name: "two objects separated by whitespace",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(createBody(t, "Example", "Example") + " \n " + createBody(t, "Other", "Other"))
+			},
+			wantMessage: invalidBody,
+		},
+		{
+			name:        "object followed by another JSON value",
+			body:        func(t *testing.T) io.Reader { return strings.NewReader(createBody(t, "Example", "Example") + " 1") },
+			wantMessage: invalidBody,
+		},
+
 		// Required fields.
 		{
 			name:        "JSON null",
@@ -197,6 +252,15 @@ func TestTicketHandlerCreate_RejectsInvalidRequests(t *testing.T) {
 		{
 			name:        "whitespace-only description",
 			body:        func(t *testing.T) io.Reader { return strings.NewReader(createBody(t, "Login fails", "  \n\t")) },
+			wantMessage: requiredFields,
+		},
+		{
+			// Trailing whitespace is still a single JSON value: the body is
+			// decoded and reaches the required-fields check.
+			name: "trailing whitespace is accepted by the decoder",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(createBody(t, "Login fails", "") + " \n\t\r\n ")
+			},
 			wantMessage: requiredFields,
 		},
 
@@ -285,6 +349,21 @@ func TestTicketHandlerUpdateStatus_RejectsInvalidRequests(t *testing.T) {
 		{name: "malformed JSON", body: strings.NewReader(`{"status": "open"`), wantMessage: invalidBody},
 		{name: "status with wrong type", body: strings.NewReader(`{"status": 1}`), wantMessage: invalidBody},
 		{name: "body larger than 1 MB", body: oversizedBody("status"), wantMessage: invalidBody},
+
+		// Unknown fields. "resolved" is a valid status, so without the
+		// unknown-field check these requests would reach the service.
+		{name: "unknown field", body: strings.NewReader(`{"status": "resolved", "unexpected": "value"}`), wantMessage: invalidBody},
+		{name: "title is not accepted on status update", body: strings.NewReader(`{"status": "resolved", "title": "Example"}`), wantMessage: invalidBody},
+
+		// Content after the first JSON value.
+		{name: "valid JSON followed by invalid text", body: strings.NewReader(`{"status": "resolved"} lixo`), wantMessage: invalidBody},
+		{name: "two consecutive objects", body: strings.NewReader(`{"status": "resolved"}{"status": "open"}`), wantMessage: invalidBody},
+		{name: "two objects separated by whitespace", body: strings.NewReader("{\"status\": \"resolved\"}\n{\"status\": \"open\"}"), wantMessage: invalidBody},
+		{name: "object followed by another JSON value", body: strings.NewReader(`{"status": "resolved"} "open"`), wantMessage: invalidBody},
+
+		// Trailing whitespace is still a single JSON value: the body is
+		// decoded and reaches the status check.
+		{name: "trailing whitespace is accepted by the decoder", body: strings.NewReader("{\"status\": \"closed\"} \n\t\r\n "), wantMessage: invalidStatus},
 
 		// Status outside open, in_progress and resolved.
 		{name: "JSON null", body: strings.NewReader(`null`), wantMessage: invalidStatus},
