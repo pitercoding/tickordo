@@ -25,6 +25,16 @@ const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: "resolved", label: statusLabels.resolved },
 ];
 
+type PriorityFilter = "all" | "low" | "medium" | "high" | "critical";
+
+const priorityOptions: { value: PriorityFilter; label: string }[] = [
+    { value: "all", label: "All priorities" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "critical", label: "Critical" },
+];
+
 // Badge colors for the priorities the AI analyzer can return.
 const priorityStyles: Record<string, string> = {
     low: "bg-slate-100 text-slate-700",
@@ -50,6 +60,19 @@ export default function TicketsTableClient({
         useState<StatusFilter>("all");
     const [currentPage, setCurrentPage] = useState(1);
     const [sortBy, setSortBy] = useState<SortOption>("newest");
+    const [priorityFilter, setPriorityFilter] =
+        useState<PriorityFilter>("all");
+    const [categoryFilter, setCategoryFilter] = useState("all");
+
+    const categoryOptions = useMemo(() => {
+        const categories = tickets
+            .map((ticket) => ticket.latest_triage_category)
+            .filter((category): category is string => category !== null);
+
+        return [...new Set(categories)].sort((a, b) =>
+            a.localeCompare(b)
+        );
+    }, [tickets]);
 
     const filteredTickets = useMemo(() => {
         const normalizedSearch = search.trim().toLowerCase();
@@ -63,9 +86,22 @@ export default function TicketsTableClient({
                 statusFilter === "all" ||
                 ticket.status === statusFilter;
 
-            return matchesTitle && matchesStatus;
+            const matchesPriority =
+                priorityFilter === "all" ||
+                ticket.latest_triage_priority === priorityFilter;
+
+            const matchesCategory =
+                categoryFilter === "all" ||
+                ticket.latest_triage_category === categoryFilter;
+
+            return (
+                matchesTitle &&
+                matchesStatus &&
+                matchesPriority &&
+                matchesCategory
+            );
         });
-    }, [tickets, search, statusFilter]);
+    }, [tickets, search, statusFilter, priorityFilter, categoryFilter]);
 
     const sortedTickets = useMemo(() => {
         return [...filteredTickets].sort((a, b) => {
@@ -115,8 +151,8 @@ export default function TicketsTableClient({
 
     return (
         <div className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row">
-                <div className="flex-1">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <div className="flex-1 sm:min-w-64">
                     <label
                         htmlFor="ticket-search"
                         className="sr-only"
@@ -167,6 +203,60 @@ export default function TicketsTableClient({
 
                 <div>
                     <label
+                        htmlFor="ticket-priority-filter"
+                        className="sr-only"
+                    >
+                        Filter tickets by priority
+                    </label>
+                    <select
+                        id="ticket-priority-filter"
+                        value={priorityFilter}
+                        onChange={(event) => {
+                            setPriorityFilter(
+                                event.target.value as PriorityFilter,
+                            );
+                            setCurrentPage(1);
+                        }}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:min-w-44"
+                    >
+                        {priorityOptions.map((option) => (
+                            <option
+                                key={option.value}
+                                value={option.value}
+                            >
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label
+                        htmlFor="ticket-category-filter"
+                        className="sr-only"
+                    >
+                        Filter tickets by category
+                    </label>
+                    <select
+                        id="ticket-category-filter"
+                        value={categoryFilter}
+                        onChange={(event) => {
+                            setCategoryFilter(event.target.value);
+                            setCurrentPage(1);
+                        }}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:min-w-44"
+                    >
+                        <option value="all">All categories</option>
+                        {categoryOptions.map((category) => (
+                            <option key={category} value={category}>
+                                {category}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label
                         htmlFor="ticket-sort"
                         className="sr-only"
                     >
@@ -202,13 +292,15 @@ export default function TicketsTableClient({
                                 No tickets found
                             </p>
                             <p className="mt-1 text-sm text-slate-500">
-                                Try changing your search or status filter.
+                                Try changing your search or filters.
                             </p>
                             <button
                                 type="button"
                                 onClick={() => {
                                     setSearch("");
                                     setStatusFilter("all");
+                                    setPriorityFilter("all");
+                                    setCategoryFilter("all");
                                     setCurrentPage(1);
                                 }}
                                 className="mt-4 text-sm font-medium text-blue-700 transition hover:text-blue-800"
