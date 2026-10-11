@@ -11,6 +11,11 @@ import {
   DashboardStatsSkeleton,
 } from "@/components/dashboard/dashboard-stats";
 
+import {
+  NeedsAttention,
+  NeedsAttentionSkeleton,
+} from "@/components/dashboard/needs-attention";
+
 export default function Home() {
   return (
     <main className="min-h-screen">
@@ -45,6 +50,10 @@ export default function Home() {
 
         <Suspense fallback={<DashboardStatsSkeleton />}>
           <DashboardStatsCards />
+        </Suspense>
+
+        <Suspense fallback={<NeedsAttentionSkeleton />}>
+          <NeedsAttention />
         </Suspense>
 
         <section className="mt-8">
