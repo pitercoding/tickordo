@@ -106,6 +106,11 @@ func (h *TicketTriageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A nil slice marshals to null; clients expect an array, even when empty.
+	if triages == nil {
+		triages = []*models.TicketTriage{}
+	}
+
 	// Encode before writing headers so encoding errors can still return 500.
 	response, err := json.Marshal(triages)
 	if err != nil {

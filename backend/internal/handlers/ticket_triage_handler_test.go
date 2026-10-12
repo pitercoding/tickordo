@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pitercoding/tickordo/internal/models"
@@ -166,10 +167,13 @@ func TestTicketTriageHandlerCreate_ChecksIDBeforeBody(t *testing.T) {
 }
 
 // fakeTicketTriageService implements ticketTriageService without a database
-// or OpenAI. Every method records the call and returns err, so a test
-// decides exactly which error the handler receives from the service layer.
+// or OpenAI. Every method records the call and returns err (and triages,
+// for ListTriagesByTicketID), so a test decides exactly what the handler
+// receives from the service layer.
 type fakeTicketTriageService struct {
-	err error
+	// triages is returned by ListTriagesByTicketID.
+	triages []*models.TicketTriage
+	err     error
 
 	calls       int
 	gotTicketID uuid.UUID
@@ -184,7 +188,7 @@ func (f *fakeTicketTriageService) AnalyzeTicket(ctx context.Context, ticketID uu
 func (f *fakeTicketTriageService) ListTriagesByTicketID(ctx context.Context, ticketID uuid.UUID) ([]*models.TicketTriage, error) {
 	f.calls++
 	f.gotTicketID = ticketID
-	return nil, f.err
+	return f.triages, f.err
 }
 
 func (f *fakeTicketTriageService) GetLatestTriageByTicketID(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error) {
@@ -294,6 +298,133 @@ func TestTicketTriageHandler_MapsServiceErrors(t *testing.T) {
 			// The exact message also shows the internal error text is not
 			// leaked to the client.
 			assertErrorResponse(t, rec, tt.wantStatus, tt.wantMessage)
+
+			if service.calls != 1 {
+				t.Errorf("service calls = %d, want 1", service.calls)
+			}
+
+			if service.gotTicketID.String() != validTicketID {
+				t.Errorf("service got ticket ID %q, want %q", service.gotTicketID, validTicketID)
+			}
+		})
+	}
+}
+
+func TestTicketTriageHandlerList_ReturnsTriages(t *testing.T) {
+	const (
+		newerTriageID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+		olderTriageID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	)
+
+	ticketID := uuid.MustParse(validTicketID)
+
+	// Like the real repository, the fake returns the newest triage first.
+	// The handler must keep that order: the frontend treats the first item
+	// as the latest analysis.
+	service := &fakeTicketTriageService{
+		triages: []*models.TicketTriage{
+			{
+				ID:              uuid.MustParse(newerTriageID),
+				TicketID:        ticketID,
+				Category:        "authentication",
+				Priority:        "high",
+				Sentiment:       "negative",
+				SuggestedTeam:   "identity",
+				Summary:         "User cannot log in with a valid password",
+				SuggestedAction: "Reset the user's session tokens",
+				Confidence:      0.92,
+				Model:           "gpt-5",
+				CreatedAt:       time.Date(2026, 1, 3, 4, 5, 6, 0, time.UTC),
+			},
+			{
+				ID:              uuid.MustParse(olderTriageID),
+				TicketID:        ticketID,
+				Category:        "billing",
+				Priority:        "low",
+				Sentiment:       "neutral",
+				SuggestedTeam:   "finance",
+				Summary:         "Customer asks why the January invoice is missing",
+				SuggestedAction: "Forward to the billing team",
+				Confidence:      0.5,
+				Model:           "gpt-4.1",
+				CreatedAt:       time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			},
+		},
+	}
+	handler := NewTicketTriageHandler(service)
+
+	req := httptest.NewRequest(http.MethodGet, "/tickets/"+validTicketID+"/triages", nil)
+	req.SetPathValue("id", validTicketID)
+
+	rec := serve(t, handler.List, req)
+
+	assertJSONResponse(t, rec, http.StatusOK, []any{
+		map[string]any{
+			"id":               newerTriageID,
+			"ticket_id":        validTicketID,
+			"category":         "authentication",
+			"priority":         "high",
+			"sentiment":        "negative",
+			"suggested_team":   "identity",
+			"summary":          "User cannot log in with a valid password",
+			"suggested_action": "Reset the user's session tokens",
+			"confidence":       0.92,
+			"model":            "gpt-5",
+			"created_at":       "2026-01-03T04:05:06Z",
+		},
+		map[string]any{
+			"id":               olderTriageID,
+			"ticket_id":        validTicketID,
+			"category":         "billing",
+			"priority":         "low",
+			"sentiment":        "neutral",
+			"suggested_team":   "finance",
+			"summary":          "Customer asks why the January invoice is missing",
+			"suggested_action": "Forward to the billing team",
+			"confidence":       0.5,
+			"model":            "gpt-4.1",
+			"created_at":       "2026-01-02T03:04:05Z",
+		},
+	})
+
+	if service.calls != 1 {
+		t.Errorf("service calls = %d, want 1", service.calls)
+	}
+
+	if service.gotTicketID.String() != validTicketID {
+		t.Errorf("service got ticket ID %q, want %q", service.gotTicketID, validTicketID)
+	}
+}
+
+func TestTicketTriageHandlerList_ReturnsEmptyArray(t *testing.T) {
+	// The real repository returns an empty, non-nil slice when a ticket has
+	// never been triaged. A nil slice would marshal to null, so the handler
+	// must turn both into [] for the frontend, which slices the list.
+	tests := []struct {
+		name    string
+		triages []*models.TicketTriage
+	}{
+		{name: "empty slice", triages: []*models.TicketTriage{}},
+		{name: "nil slice", triages: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeTicketTriageService{triages: tt.triages}
+			handler := NewTicketTriageHandler(service)
+
+			req := httptest.NewRequest(http.MethodGet, "/tickets/"+validTicketID+"/triages", nil)
+			req.SetPathValue("id", validTicketID)
+
+			rec := serve(t, handler.List, req)
+
+			assertJSONResponse(t, rec, http.StatusOK, []any{})
+
+			// []any{} and nil decode differently, but check the raw body too
+			// so the contract is explicit: an empty array, never null.
+			if got := rec.Body.String(); got != "[]" {
+				t.Errorf("response body = %q, want %q", got, "[]")
+			}
 
 			if service.calls != 1 {
 				t.Errorf("service calls = %d, want 1", service.calls)
