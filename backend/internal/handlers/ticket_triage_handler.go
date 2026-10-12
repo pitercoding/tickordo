@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 
@@ -28,6 +29,15 @@ func (h *TicketTriageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ticketID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		writeError(w, "invalid ticket ID", http.StatusBadRequest)
+		return
+	}
+
+	// Triage takes no input besides the ticket ID, so any body content is
+	// rejected instead of silently ignored. Reading one byte is enough to
+	// tell; io.ReadFull returns io.EOF only when the body is empty. An empty
+	// body with a Content-Type header (as the frontend sends) is accepted.
+	if _, err := io.ReadFull(r.Body, make([]byte, 1)); !errors.Is(err, io.EOF) {
+		writeError(w, "request body must be empty", http.StatusBadRequest)
 		return
 	}
 
