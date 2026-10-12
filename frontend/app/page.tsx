@@ -16,6 +16,8 @@ import {
   NeedsAttentionSkeleton,
 } from "@/components/dashboard/needs-attention";
 
+import { Greeting } from "@/components/dashboard/greeting";
+
 export default function Home() {
   return (
     <main className="min-h-screen">
@@ -40,9 +42,7 @@ export default function Home() {
         </header>
 
         <section className="py-8">
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Good morning
-          </h2>
+          <Greeting />
           <p className="mt-1 text-slate-500">
             Monitor and prioritize your support tickets.
           </p>
