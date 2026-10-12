@@ -6,22 +6,24 @@ import (
 	"testing"
 )
 
-// These are the exact values CORS sets in cors.go.
+// These are the exact values CORS sets in cors.go. The tests pass
+// wantAllowOrigin as the allowed origin, matching the config default.
 const (
 	wantAllowOrigin  = "http://localhost:3000"
 	wantAllowMethods = "GET, POST, PATCH, OPTIONS"
 	wantAllowHeaders = "Content-Type"
 )
 
-// assertCORSHeaders checks that rec carries the three headers CORS sets.
-func assertCORSHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
+// assertCORSHeaders checks that rec carries the three headers CORS sets,
+// with wantOrigin as the allowed origin.
+func assertCORSHeaders(t *testing.T, rec *httptest.ResponseRecorder, wantOrigin string) {
 	t.Helper()
 
 	headers := []struct {
 		name string
 		want string
 	}{
-		{name: "Access-Control-Allow-Origin", want: wantAllowOrigin},
+		{name: "Access-Control-Allow-Origin", want: wantOrigin},
 		{name: "Access-Control-Allow-Methods", want: wantAllowMethods},
 		{name: "Access-Control-Allow-Headers", want: wantAllowHeaders},
 	}
@@ -55,7 +57,7 @@ func TestCORS_NonPreflightRequestReachesNextHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			next := &recordingHandler{}
 
-			CORS(next).ServeHTTP(rec, req)
+			CORS(wantAllowOrigin, next).ServeHTTP(rec, req)
 
 			if !next.called {
 				t.Fatal("next handler was not called")
@@ -70,7 +72,7 @@ func TestCORS_NonPreflightRequestReachesNextHandler(t *testing.T) {
 				t.Errorf("body = %q, want %q", got, want)
 			}
 
-			assertCORSHeaders(t, rec)
+			assertCORSHeaders(t, rec, wantAllowOrigin)
 		})
 	}
 }
@@ -84,7 +86,7 @@ func TestCORS_PreflightReturnsNoContentWithoutCallingNext(t *testing.T) {
 	rec := httptest.NewRecorder()
 	next := &recordingHandler{}
 
-	CORS(next).ServeHTTP(rec, req)
+	CORS(wantAllowOrigin, next).ServeHTTP(rec, req)
 
 	if next.called {
 		t.Error("next handler was called for a preflight request")
@@ -98,11 +100,11 @@ func TestCORS_PreflightReturnsNoContentWithoutCallingNext(t *testing.T) {
 		t.Errorf("body = %q, want empty", rec.Body.String())
 	}
 
-	assertCORSHeaders(t, rec)
+	assertCORSHeaders(t, rec, wantAllowOrigin)
 }
 
 func TestCORS_HeadersDoNotDependOnRequestOrigin(t *testing.T) {
-	// CORS never reads the Origin header: it always allows localhost:3000 and
+	// CORS never reads the Origin header: it always allows the configured origin and
 	// still calls next. Blocking any other origin is left to the browser,
 	// which compares its own origin with Access-Control-Allow-Origin.
 	tests := []struct {
@@ -123,13 +125,58 @@ func TestCORS_HeadersDoNotDependOnRequestOrigin(t *testing.T) {
 			rec := httptest.NewRecorder()
 			next := &recordingHandler{}
 
-			CORS(next).ServeHTTP(rec, req)
+			CORS(wantAllowOrigin, next).ServeHTTP(rec, req)
 
 			if !next.called {
 				t.Error("next handler was not called")
 			}
 
-			assertCORSHeaders(t, rec)
+			assertCORSHeaders(t, rec, wantAllowOrigin)
 		})
 	}
+}
+
+func TestCORS_UsesConfiguredOrigin(t *testing.T) {
+	// The allowed origin comes from the caller (CORS_ALLOWED_ORIGIN in main),
+	// for normal and preflight requests alike.
+	const origin = "https://app.tickordo.example"
+
+	t.Run("GET", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/tickets", nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		next := &recordingHandler{}
+
+		CORS(origin, next).ServeHTTP(rec, req)
+
+		if !next.called {
+			t.Error("next handler was not called")
+		}
+
+		if rec.Code != http.StatusCreated {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusCreated)
+		}
+
+		assertCORSHeaders(t, rec, origin)
+	})
+
+	t.Run("OPTIONS preflight", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/tickets", nil)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		rec := httptest.NewRecorder()
+		next := &recordingHandler{}
+
+		CORS(origin, next).ServeHTTP(rec, req)
+
+		if next.called {
+			t.Error("next handler was called for a preflight request")
+		}
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
+		}
+
+		assertCORSHeaders(t, rec, origin)
+	})
 }

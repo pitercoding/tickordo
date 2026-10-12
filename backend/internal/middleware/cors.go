@@ -2,9 +2,11 @@ package middleware
 
 import "net/http"
 
-func CORS(next http.Handler) http.Handler {
+// CORS allows the browser at allowedOrigin to call the API and answers
+// preflight requests without reaching next.
+func CORS(allowedOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 

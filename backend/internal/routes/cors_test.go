@@ -29,7 +29,7 @@ func assertCORSHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
 }
 
 // The tests below wrap the router in middleware.CORS exactly as main does
-// with the server's Handler.
+// with the server's Handler, using the default CORS_ALLOWED_ORIGIN.
 
 func TestCORSRouter_PreflightStopsBeforeRouter(t *testing.T) {
 	// No route is registered for OPTIONS, so a preflight that reached the
@@ -49,7 +49,7 @@ func TestCORSRouter_PreflightStopsBeforeRouter(t *testing.T) {
 			req.Header.Set("Access-Control-Request-Method", http.MethodPost)
 			req.Header.Set("Access-Control-Request-Headers", "content-type")
 
-			rec := serveMux(t, middleware.CORS(newTestMux()), req)
+			rec := serveMux(t, middleware.CORS("http://localhost:3000", newTestMux()), req)
 
 			if rec.Code != http.StatusNoContent {
 				t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
@@ -73,7 +73,7 @@ func TestCORSRouter_RequestReachesRouteWithCORSHeaders(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		req.Header.Set("Origin", "http://localhost:3000")
 
-		rec := serveMux(t, middleware.CORS(newTestMux()), req)
+		rec := serveMux(t, middleware.CORS("http://localhost:3000", newTestMux()), req)
 
 		if rec.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -92,7 +92,7 @@ func TestCORSRouter_RequestReachesRouteWithCORSHeaders(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/dashboard/stats", nil)
 		req.Header.Set("Origin", "http://localhost:3000")
 
-		rec := serveMux(t, middleware.CORS(newFailingServicesMux()), req)
+		rec := serveMux(t, middleware.CORS("http://localhost:3000", newFailingServicesMux()), req)
 
 		assertHandlerError(t, rec, http.StatusInternalServerError, "failed to get dashboard statistics")
 		assertCORSHeaders(t, rec)

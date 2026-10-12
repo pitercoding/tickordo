@@ -102,7 +102,7 @@ func main() {
 	// analyze timeout, otherwise triage responses would be cut off.
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           middleware.CORS(mux),
+		Handler:           middleware.CORS(cfg.CORSAllowedOrigin, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      90 * time.Second,

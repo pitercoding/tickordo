@@ -6,9 +6,10 @@ import (
 )
 
 type Config struct {
-	Port         string
-	DatabaseURL  string
-	OpenAIAPIKey string
+	Port              string
+	DatabaseURL       string
+	OpenAIAPIKey      string
+	CORSAllowedOrigin string
 }
 
 // Load reads the configuration from environment variables and returns an
@@ -20,10 +21,18 @@ func Load() (Config, error) {
 		port = "8080"
 	}
 
+	// Default to the local frontend so development works without extra setup.
+	corsAllowedOrigin := os.Getenv("CORS_ALLOWED_ORIGIN")
+
+	if corsAllowedOrigin == "" {
+		corsAllowedOrigin = "http://localhost:3000"
+	}
+
 	cfg := Config{
-		Port:         port,
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
-		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+		Port:              port,
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		OpenAIAPIKey:      os.Getenv("OPENAI_API_KEY"),
+		CORSAllowedOrigin: corsAllowedOrigin,
 	}
 
 	if cfg.DatabaseURL == "" {
