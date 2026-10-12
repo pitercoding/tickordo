@@ -9,9 +9,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime/debug"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pitercoding/tickordo/internal/models"
@@ -580,19 +582,29 @@ func TestTicketHandler_AcceptsBodyAtSizeLimit(t *testing.T) {
 }
 
 // fakeTicketService implements ticketService without a database. Every
-// method records the call and returns err, so a test decides exactly which
-// error the handler receives from the service layer.
+// method records the call and its arguments and returns ticket (where the
+// method returns one) and err, so a test decides exactly what the handler
+// receives from the service layer.
 type fakeTicketService struct {
-	err error
+	// ticket is returned by CreateTicket and GetTicketByID.
+	ticket *models.Ticket
+	err    error
 
 	calls int
 	// gotID is the ticket ID passed to GetTicketByID or UpdateTicketStatus.
 	gotID uuid.UUID
+	// gotTitle and gotDescription are the values passed to CreateTicket.
+	gotTitle       string
+	gotDescription string
+	// gotStatus is the status passed to UpdateTicketStatus.
+	gotStatus string
 }
 
 func (f *fakeTicketService) CreateTicket(ctx context.Context, title string, description string) (*models.Ticket, error) {
 	f.calls++
-	return nil, f.err
+	f.gotTitle = title
+	f.gotDescription = description
+	return f.ticket, f.err
 }
 
 func (f *fakeTicketService) ListTickets(ctx context.Context) ([]models.Ticket, error) {
@@ -603,12 +615,13 @@ func (f *fakeTicketService) ListTickets(ctx context.Context) ([]models.Ticket, e
 func (f *fakeTicketService) GetTicketByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error) {
 	f.calls++
 	f.gotID = id
-	return nil, f.err
+	return f.ticket, f.err
 }
 
 func (f *fakeTicketService) UpdateTicketStatus(ctx context.Context, id uuid.UUID, status string) error {
 	f.calls++
 	f.gotID = id
+	f.gotStatus = status
 	return f.err
 }
 
@@ -731,6 +744,155 @@ func TestTicketHandler_MapsServiceErrors(t *testing.T) {
 
 			if tt.wantID && service.gotID.String() != validTicketID {
 				t.Errorf("service got ticket ID %q, want %q", service.gotID, validTicketID)
+			}
+		})
+	}
+}
+
+// assertJSONResponse checks the status code, the JSON Content-Type and that
+// the body decodes to exactly want. Comparing generic JSON values checks the
+// field names and values the client sees, including null fields.
+func assertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, want map[string]any) {
+	t.Helper()
+
+	if rec.Code != wantStatus {
+		t.Errorf("status = %d, want %d", rec.Code, wantStatus)
+	}
+
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/json")
+	}
+
+	raw := rec.Body.String()
+
+	var body map[string]any
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatalf("response body is not a JSON object: %v; body = %q", err, raw)
+	}
+
+	if !reflect.DeepEqual(body, want) {
+		t.Errorf("response body = %v, want %v", body, want)
+	}
+}
+
+func TestTicketHandlerGetByID_ReturnsTicket(t *testing.T) {
+	category := "authentication"
+	priority := "high"
+
+	service := &fakeTicketService{
+		ticket: &models.Ticket{
+			ID:                   uuid.MustParse(validTicketID),
+			Title:                "Login fails",
+			Description:          "Cannot log in with a valid password",
+			Status:               "in_progress",
+			LatestTriageCategory: &category,
+			LatestTriagePriority: &priority,
+			CreatedAt:            time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			UpdatedAt:            time.Date(2026, 1, 3, 4, 5, 6, 0, time.UTC),
+		},
+	}
+	handler := NewTicketHandler(service)
+
+	req := httptest.NewRequest(http.MethodGet, "/tickets/"+validTicketID, nil)
+	req.SetPathValue("id", validTicketID)
+
+	rec := serve(t, handler.GetByID, req)
+
+	assertJSONResponse(t, rec, http.StatusOK, map[string]any{
+		"id":                     validTicketID,
+		"title":                  "Login fails",
+		"description":            "Cannot log in with a valid password",
+		"status":                 "in_progress",
+		"latest_triage_category": "authentication",
+		"latest_triage_priority": "high",
+		"created_at":             "2026-01-02T03:04:05Z",
+		"updated_at":             "2026-01-03T04:05:06Z",
+	})
+
+	if service.calls != 1 {
+		t.Errorf("service calls = %d, want 1", service.calls)
+	}
+
+	if service.gotID.String() != validTicketID {
+		t.Errorf("service got ticket ID %q, want %q", service.gotID, validTicketID)
+	}
+}
+
+func TestTicketHandlerCreate_ReturnsCreatedTicket(t *testing.T) {
+	// Like the real service, the fake returns a new open ticket with no
+	// triage yet; the database would fill in the timestamps.
+	service := &fakeTicketService{
+		ticket: &models.Ticket{
+			ID:          uuid.MustParse(validTicketID),
+			Title:       "Login fails",
+			Description: "Cannot log in",
+			Status:      "open",
+			CreatedAt:   time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			UpdatedAt:   time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		},
+	}
+	handler := NewTicketHandler(service)
+
+	// Surrounding whitespace is trimmed before the values reach the service.
+	body := strings.NewReader(createBody(t, "  Login fails \n", "\tCannot log in  "))
+	req := httptest.NewRequest(http.MethodPost, "/tickets", body)
+
+	rec := serve(t, handler.Create, req)
+
+	assertJSONResponse(t, rec, http.StatusCreated, map[string]any{
+		"id":                     validTicketID,
+		"title":                  "Login fails",
+		"description":            "Cannot log in",
+		"status":                 "open",
+		"latest_triage_category": nil,
+		"latest_triage_priority": nil,
+		"created_at":             "2026-01-02T03:04:05Z",
+		"updated_at":             "2026-01-02T03:04:05Z",
+	})
+
+	if service.calls != 1 {
+		t.Errorf("service calls = %d, want 1", service.calls)
+	}
+
+	if service.gotTitle != "Login fails" {
+		t.Errorf("service got title %q, want %q", service.gotTitle, "Login fails")
+	}
+
+	if service.gotDescription != "Cannot log in" {
+		t.Errorf("service got description %q, want %q", service.gotDescription, "Cannot log in")
+	}
+}
+
+func TestTicketHandlerUpdateStatus_ReturnsNoContent(t *testing.T) {
+	for _, status := range []string{"open", "in_progress", "resolved"} {
+		t.Run(status, func(t *testing.T) {
+			service := &fakeTicketService{}
+			handler := NewTicketHandler(service)
+
+			body := strings.NewReader(`{"status": "` + status + `"}`)
+			req := httptest.NewRequest(http.MethodPatch, "/tickets/"+validTicketID, body)
+			req.SetPathValue("id", validTicketID)
+
+			rec := serve(t, handler.UpdateStatus, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Errorf("status = %d, want %d", rec.Code, http.StatusNoContent)
+			}
+
+			if rec.Body.Len() != 0 {
+				t.Errorf("response body = %q, want empty", rec.Body.String())
+			}
+
+			if service.calls != 1 {
+				t.Errorf("service calls = %d, want 1", service.calls)
+			}
+
+			if service.gotID.String() != validTicketID {
+				t.Errorf("service got ticket ID %q, want %q", service.gotID, validTicketID)
+			}
+
+			if service.gotStatus != status {
+				t.Errorf("service got status %q, want %q", service.gotStatus, status)
 			}
 		})
 	}
