@@ -1,19 +1,31 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 
+	"github.com/pitercoding/tickordo/internal/models"
 	"github.com/pitercoding/tickordo/internal/services"
 )
 
+// dashboardService lists the service methods DashboardHandler calls.
+// Production passes *services.DashboardService; tests pass a fake so they
+// can return any stats or error without a database.
+type dashboardService interface {
+	GetStats(ctx context.Context) (*models.DashboardStats, error)
+}
+
+// The real service must keep satisfying dashboardService.
+var _ dashboardService = (*services.DashboardService)(nil)
+
 type DashboardHandler struct {
-	service *services.DashboardService
+	service dashboardService
 }
 
 func NewDashboardHandler(
-	service *services.DashboardService,
+	service dashboardService,
 ) *DashboardHandler {
 	return &DashboardHandler{
 		service: service,
