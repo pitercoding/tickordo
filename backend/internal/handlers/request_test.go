@@ -1,6 +1,10 @@
 package handlers
 
 import (
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -68,8 +72,90 @@ func TestDecodeJSONBody_RejectsInvalidBodies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var request updateTicketStatusRequest
 
-			if err := decodeJSONBody(strings.NewReader(tt.body), &request); err == nil {
-				t.Errorf("decodeJSONBody(%q) error = nil, want an error", tt.body)
+			err := decodeJSONBody(limitedBody(tt.body), &request)
+			if err == nil {
+				t.Fatalf("decodeJSONBody(%q) error = nil, want an error", tt.body)
+			}
+
+			// These bodies are far below the cap, so the handlers must
+			// answer 400, not 413.
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				t.Errorf("decodeJSONBody(%q) error = %v, want a non-size error", tt.body, err)
+			}
+		})
+	}
+}
+
+// limitedBody wraps body in http.MaxBytesReader with maxRequestBodyBytes,
+// the same cap the ticket handlers apply.
+func limitedBody(body string) io.Reader {
+	return http.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader(body)), maxRequestBodyBytes)
+}
+
+func TestDecodeJSONBody_AcceptsValidBodyWithinLimit(t *testing.T) {
+	const valid = `{"status":"open"}`
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "small body", body: valid},
+		{name: "body of exactly the limit", body: valid + strings.Repeat(" ", maxRequestBodyBytes-len(valid))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request updateTicketStatusRequest
+
+			if err := decodeJSONBody(limitedBody(tt.body), &request); err != nil {
+				t.Fatalf("decodeJSONBody error = %v, want nil", err)
+			}
+
+			if request.Status != "open" {
+				t.Errorf("Status = %q, want %q", request.Status, "open")
+			}
+		})
+	}
+}
+
+func TestDecodeJSONBody_ReturnsMaxBytesErrorOverLimit(t *testing.T) {
+	const valid = `{"status":"open"}`
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			// The limit is crossed inside the first value.
+			name: "value one byte over the limit",
+			body: `{"status":"` + strings.Repeat("a", maxRequestBodyBytes-len(`{"status":""}`)+1) + `"}`,
+		},
+		{
+			// The value fits, but the trailing whitespace crosses the limit.
+			// This must not be reported as trailing data.
+			name: "trailing whitespace one byte over the limit",
+			body: valid + strings.Repeat(" ", maxRequestBodyBytes-len(valid)+1),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.body) != maxRequestBodyBytes+1 {
+				t.Fatalf("body is %d bytes, want %d", len(tt.body), maxRequestBodyBytes+1)
+			}
+
+			var request updateTicketStatusRequest
+
+			err := decodeJSONBody(limitedBody(tt.body), &request)
+
+			var maxBytesErr *http.MaxBytesError
+			if !errors.As(err, &maxBytesErr) {
+				t.Fatalf("decodeJSONBody error = %v, want *http.MaxBytesError", err)
+			}
+
+			if maxBytesErr.Limit != maxRequestBodyBytes {
+				t.Errorf("Limit = %d, want %d", maxBytesErr.Limit, maxRequestBodyBytes)
 			}
 		})
 	}

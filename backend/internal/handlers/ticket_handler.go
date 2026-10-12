@@ -22,7 +22,7 @@ const (
 	maxDescriptionLength = 5000
 
 	// maxRequestBodyBytes caps JSON request bodies so a client cannot send
-	// an arbitrarily large payload (1 MB).
+	// an arbitrarily large payload (1 MB). Larger bodies get a 413.
 	maxRequestBodyBytes = 1 << 20
 )
 
@@ -51,7 +51,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
 	if err := decodeJSONBody(r.Body, &request); err != nil {
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		writeDecodeError(w, err)
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *TicketHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
 	if err := decodeJSONBody(r.Body, &request); err != nil {
-		writeError(w, "invalid request body", http.StatusBadRequest)
+		writeDecodeError(w, err)
 		return
 	}
 

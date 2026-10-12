@@ -98,15 +98,22 @@ func createBody(t *testing.T, title, description string) string {
 	return string(data)
 }
 
-// oversizedBody returns a syntactically valid JSON object for the given field
-// that is larger than maxRequestBodyBytes. Without the size cap it would
-// decode fine, so a decode error can only come from the cap.
-func oversizedBody(field string) io.Reader {
+// bodyOfSize returns prefix + fill... + suffix, padded with fill so the body
+// is exactly size bytes long. It is used to build bodies right at, or just
+// over, maxRequestBodyBytes.
+func bodyOfSize(t *testing.T, prefix, suffix string, fill byte, size int) io.Reader {
+	t.Helper()
+
+	padding := size - len(prefix) - len(suffix)
+	if padding < 0 {
+		t.Fatalf("prefix and suffix (%d bytes) do not fit in %d bytes", len(prefix)+len(suffix), size)
+	}
+
 	var b bytes.Buffer
 
-	b.WriteString(`{"` + field + `":"`)
-	b.WriteString(strings.Repeat("a", maxRequestBodyBytes))
-	b.WriteString(`"}`)
+	b.WriteString(prefix)
+	b.Write(bytes.Repeat([]byte{fill}, padding))
+	b.WriteString(suffix)
 
 	return &b
 }
@@ -155,11 +162,6 @@ func TestTicketHandlerCreate_RejectsInvalidRequests(t *testing.T) {
 			body: func(t *testing.T) io.Reader {
 				return strings.NewReader(`{"title": 123, "description": "Cannot log in"}`)
 			},
-			wantMessage: invalidBody,
-		},
-		{
-			name:        "body larger than 1 MB",
-			body:        func(t *testing.T) io.Reader { return oversizedBody("title") },
 			wantMessage: invalidBody,
 		},
 
@@ -348,7 +350,6 @@ func TestTicketHandlerUpdateStatus_RejectsInvalidRequests(t *testing.T) {
 		{name: "empty body", body: strings.NewReader(""), wantMessage: invalidBody},
 		{name: "malformed JSON", body: strings.NewReader(`{"status": "open"`), wantMessage: invalidBody},
 		{name: "status with wrong type", body: strings.NewReader(`{"status": 1}`), wantMessage: invalidBody},
-		{name: "body larger than 1 MB", body: oversizedBody("status"), wantMessage: invalidBody},
 
 		// Unknown fields. "resolved" is a valid status, so without the
 		// unknown-field check these requests would reach the service.
@@ -435,4 +436,138 @@ func TestTicketHandlerUpdateStatus_ChecksIDBeforeBody(t *testing.T) {
 
 	// Both the ID and the body are invalid; the ID is reported first.
 	assertErrorResponse(t, rec, http.StatusBadRequest, "invalid ticket ID")
+}
+
+// bodyLimitEndpoints are the handlers that cap their JSON body at
+// maxRequestBodyBytes, each with a request builder.
+var bodyLimitEndpoints = []struct {
+	name       string
+	handler    func(h *TicketHandler) http.HandlerFunc
+	newRequest func(body io.Reader) *http.Request
+	// validBody is a request that passes every check, so with a nil service
+	// it would reach the service layer.
+	validBody string
+	// fieldPrefix opens a JSON string field that bodyOfSize pads and the
+	// suffix `"}` closes.
+	fieldPrefix string
+	// fieldMessage is the validation error that a padded field triggers
+	// once the body is decoded.
+	fieldMessage string
+}{
+	{
+		name:    "Create",
+		handler: func(h *TicketHandler) http.HandlerFunc { return h.Create },
+		newRequest: func(body io.Reader) *http.Request {
+			return httptest.NewRequest(http.MethodPost, "/tickets", body)
+		},
+		validBody:    `{"title": "Login fails", "description": "Cannot log in"}`,
+		fieldPrefix:  `{"title": "Login fails", "description": "`,
+		fieldMessage: "description must be at most 5000 characters",
+	},
+	{
+		name:    "UpdateStatus",
+		handler: func(h *TicketHandler) http.HandlerFunc { return h.UpdateStatus },
+		newRequest: func(body io.Reader) *http.Request {
+			req := httptest.NewRequest(http.MethodPatch, "/tickets/"+validTicketID, body)
+			req.SetPathValue("id", validTicketID)
+			return req
+		},
+		validBody:    `{"status": "resolved"}`,
+		fieldPrefix:  `{"status": "`,
+		fieldMessage: "invalid ticket status",
+	},
+}
+
+func TestTicketHandler_RejectsOversizedBody(t *testing.T) {
+	const tooLarge = "request body must be at most 1 MB"
+
+	for _, endpoint := range bodyLimitEndpoints {
+		tests := []struct {
+			name string
+			body func(t *testing.T) io.Reader
+		}{
+			{
+				// Well-formed JSON one byte over the limit: only the cap can
+				// make it fail to decode.
+				name: "valid JSON one byte over the limit",
+				body: func(t *testing.T) io.Reader {
+					return bodyOfSize(t, endpoint.fieldPrefix, `"}`, 'a', maxRequestBodyBytes+1)
+				},
+			},
+			{
+				// A valid request whose trailing whitespace crosses the limit.
+				// Without the cap it would reach the service, which panics
+				// here (nil service), so a 413 also shows the service is not
+				// called.
+				name: "valid request padded past the limit with trailing whitespace",
+				body: func(t *testing.T) io.Reader {
+					return bodyOfSize(t, endpoint.validBody, "", ' ', maxRequestBodyBytes+1)
+				},
+			},
+			{
+				name: "body far over the limit",
+				body: func(t *testing.T) io.Reader {
+					return bodyOfSize(t, endpoint.fieldPrefix, `"}`, 'a', 2*maxRequestBodyBytes)
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(endpoint.name+"/"+tt.name, func(t *testing.T) {
+				handler := NewTicketHandler(nil)
+				req := endpoint.newRequest(tt.body(t))
+
+				rec := serve(t, endpoint.handler(handler), req)
+
+				assertErrorResponse(t, rec, http.StatusRequestEntityTooLarge, tooLarge)
+			})
+		}
+	}
+}
+
+func TestTicketHandler_AcceptsBodyAtSizeLimit(t *testing.T) {
+	for _, endpoint := range bodyLimitEndpoints {
+		tests := []struct {
+			name        string
+			body        func(t *testing.T) io.Reader
+			wantMessage string
+		}{
+			{
+				// Exactly maxRequestBodyBytes is allowed: the body is decoded
+				// and reaches field validation instead of getting a 413.
+				name: "valid JSON of exactly the limit",
+				body: func(t *testing.T) io.Reader {
+					return bodyOfSize(t, endpoint.fieldPrefix, `"}`, 'a', maxRequestBodyBytes)
+				},
+				wantMessage: endpoint.fieldMessage,
+			},
+			{
+				// Malformed JSON within the limit is still a 400.
+				name: "malformed JSON of exactly the limit",
+				body: func(t *testing.T) io.Reader {
+					return bodyOfSize(t, endpoint.fieldPrefix, `"`, 'a', maxRequestBodyBytes)
+				},
+				wantMessage: "invalid request body",
+			},
+			{
+				// Trailing data within the limit is still a 400.
+				name: "trailing data reaching exactly the limit",
+				body: func(t *testing.T) io.Reader {
+					return bodyOfSize(t, endpoint.validBody, " x", ' ', maxRequestBodyBytes)
+				},
+				wantMessage: "invalid request body",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(endpoint.name+"/"+tt.name, func(t *testing.T) {
+				handler := NewTicketHandler(nil)
+				req := endpoint.newRequest(tt.body(t))
+
+				rec := serve(t, endpoint.handler(handler), req)
+
+				assertErrorResponse(t, rec, http.StatusBadRequest, tt.wantMessage)
+			})
+		}
+	}
 }
