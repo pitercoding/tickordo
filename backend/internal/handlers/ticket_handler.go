@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/pitercoding/tickordo/internal/models"
 	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/services"
 )
@@ -26,8 +28,20 @@ const (
 	maxRequestBodyBytes = 1 << 20
 )
 
+// ticketService lists the service methods TicketHandler calls. Production
+// passes *services.TicketService; tests pass a fake so they can return any error without a database.
+type ticketService interface {
+	CreateTicket(ctx context.Context, title string, description string) (*models.Ticket, error)
+	ListTickets(ctx context.Context) ([]models.Ticket, error)
+	GetTicketByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error)
+	UpdateTicketStatus(ctx context.Context, id uuid.UUID, status string) error
+}
+
+// The real service must keep satisfying ticketService.
+var _ ticketService = (*services.TicketService)(nil)
+
 type TicketHandler struct {
-	service *services.TicketService
+	service ticketService
 }
 
 type createTicketRequest struct {
@@ -39,7 +53,7 @@ type updateTicketStatusRequest struct {
 	Status string `json:"status"`
 }
 
-func NewTicketHandler(service *services.TicketService) *TicketHandler {
+func NewTicketHandler(service ticketService) *TicketHandler {
 	return &TicketHandler{
 		service: service,
 	}

@@ -2,13 +2,19 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/pitercoding/tickordo/internal/models"
+	"github.com/pitercoding/tickordo/internal/repositories"
 )
 
 func TestTicketTriageHandler_RejectsInvalidTicketID(t *testing.T) {
@@ -157,4 +163,145 @@ func TestTicketTriageHandlerCreate_ChecksIDBeforeBody(t *testing.T) {
 
 	// Both the ID and the body are invalid; the ID is reported first.
 	assertErrorResponse(t, rec, http.StatusBadRequest, "invalid ticket ID")
+}
+
+// fakeTicketTriageService implements ticketTriageService without a database
+// or OpenAI. Every method records the call and returns err, so a test
+// decides exactly which error the handler receives from the service layer.
+type fakeTicketTriageService struct {
+	err error
+
+	calls       int
+	gotTicketID uuid.UUID
+}
+
+func (f *fakeTicketTriageService) AnalyzeTicket(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error) {
+	f.calls++
+	f.gotTicketID = ticketID
+	return nil, f.err
+}
+
+func (f *fakeTicketTriageService) ListTriagesByTicketID(ctx context.Context, ticketID uuid.UUID) ([]*models.TicketTriage, error) {
+	f.calls++
+	f.gotTicketID = ticketID
+	return nil, f.err
+}
+
+func (f *fakeTicketTriageService) GetLatestTriageByTicketID(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error) {
+	f.calls++
+	f.gotTicketID = ticketID
+	return nil, f.err
+}
+
+func TestTicketTriageHandler_MapsServiceErrors(t *testing.T) {
+	// The real service wraps repository errors with %w, so the fakes return
+	// wrapped errors too.
+	ticketNotFound := fmt.Errorf("failed to get ticket: %w", repositories.ErrTicketNotFound)
+	unexpected := errors.New("connection refused")
+
+	create := func(h *TicketTriageHandler) http.HandlerFunc { return h.Create }
+	list := func(h *TicketTriageHandler) http.HandlerFunc { return h.List }
+	getLatest := func(h *TicketTriageHandler) http.HandlerFunc { return h.GetLatest }
+
+	tests := []struct {
+		name        string
+		method      string
+		handler     func(h *TicketTriageHandler) http.HandlerFunc
+		serviceErr  error
+		wantStatus  int
+		wantMessage string
+	}{
+		{
+			name:        "Create/ticket not found",
+			method:      http.MethodPost,
+			handler:     create,
+			serviceErr:  ticketNotFound,
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "ticket not found",
+		},
+		{
+			// What the service returns when the OpenAI call fails.
+			name:        "Create/analyzer error",
+			method:      http.MethodPost,
+			handler:     create,
+			serviceErr:  fmt.Errorf("failed to analyze ticket: %w", errors.New("openai timeout")),
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to triage ticket",
+		},
+		{
+			name:        "Create/unexpected error",
+			method:      http.MethodPost,
+			handler:     create,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to triage ticket",
+		},
+		{
+			name:        "List/ticket not found",
+			method:      http.MethodGet,
+			handler:     list,
+			serviceErr:  ticketNotFound,
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "ticket not found",
+		},
+		{
+			name:        "List/unexpected error",
+			method:      http.MethodGet,
+			handler:     list,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to retrieve ticket triage history",
+		},
+		{
+			name:        "GetLatest/ticket not found",
+			method:      http.MethodGet,
+			handler:     getLatest,
+			serviceErr:  ticketNotFound,
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "ticket not found",
+		},
+		{
+			// The ticket exists but has never been triaged.
+			name:        "GetLatest/triage not found",
+			method:      http.MethodGet,
+			handler:     getLatest,
+			serviceErr:  fmt.Errorf("failed to get latest ticket triage: %w", repositories.ErrTicketTriageNotFound),
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "ticket triage not found",
+		},
+		{
+			name:        "GetLatest/unexpected error",
+			method:      http.MethodGet,
+			handler:     getLatest,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to retrieve latest ticket triage",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeTicketTriageService{err: tt.serviceErr}
+			handler := NewTicketTriageHandler(service)
+
+			// No body: Create requires an empty one, List and GetLatest ignore it.
+			req := httptest.NewRequest(tt.method, "/tickets/"+validTicketID+"/triage", nil)
+			req.SetPathValue("id", validTicketID)
+
+			// serve fails the test if the handler panics on the error.
+			rec := serve(t, tt.handler(handler), req)
+
+			// The exact message also shows the internal error text is not
+			// leaked to the client.
+			assertErrorResponse(t, rec, tt.wantStatus, tt.wantMessage)
+
+			if service.calls != 1 {
+				t.Errorf("service calls = %d, want 1", service.calls)
+			}
+
+			if service.gotTicketID.String() != validTicketID {
+				t.Errorf("service got ticket ID %q, want %q", service.gotTicketID, validTicketID)
+			}
+		})
+	}
 }

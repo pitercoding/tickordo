@@ -2,13 +2,20 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/pitercoding/tickordo/internal/models"
+	"github.com/pitercoding/tickordo/internal/repositories"
 )
 
 // validTicketID is a well-formed UUID, used when a test needs the ID check
@@ -569,5 +576,162 @@ func TestTicketHandler_AcceptsBodyAtSizeLimit(t *testing.T) {
 				assertErrorResponse(t, rec, http.StatusBadRequest, tt.wantMessage)
 			})
 		}
+	}
+}
+
+// fakeTicketService implements ticketService without a database. Every
+// method records the call and returns err, so a test decides exactly which
+// error the handler receives from the service layer.
+type fakeTicketService struct {
+	err error
+
+	calls int
+	// gotID is the ticket ID passed to GetTicketByID or UpdateTicketStatus.
+	gotID uuid.UUID
+}
+
+func (f *fakeTicketService) CreateTicket(ctx context.Context, title string, description string) (*models.Ticket, error) {
+	f.calls++
+	return nil, f.err
+}
+
+func (f *fakeTicketService) ListTickets(ctx context.Context) ([]models.Ticket, error) {
+	f.calls++
+	return nil, f.err
+}
+
+func (f *fakeTicketService) GetTicketByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error) {
+	f.calls++
+	f.gotID = id
+	return nil, f.err
+}
+
+func (f *fakeTicketService) UpdateTicketStatus(ctx context.Context, id uuid.UUID, status string) error {
+	f.calls++
+	f.gotID = id
+	return f.err
+}
+
+func TestTicketHandler_MapsServiceErrors(t *testing.T) {
+	// The real service wraps repository errors with %w, so the fakes return
+	// wrapped errors too: the handler must find ErrTicketNotFound with
+	// errors.Is, not by comparing the error directly.
+	notFound := fmt.Errorf("failed to get ticket: %w", repositories.ErrTicketNotFound)
+	unexpected := errors.New("connection refused")
+
+	newCreateRequest := func() *http.Request {
+		body := strings.NewReader(`{"title": "Login fails", "description": "Cannot log in"}`)
+		return httptest.NewRequest(http.MethodPost, "/tickets", body)
+	}
+	newListRequest := func() *http.Request {
+		return httptest.NewRequest(http.MethodGet, "/tickets", nil)
+	}
+	newGetRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/tickets/"+validTicketID, nil)
+		req.SetPathValue("id", validTicketID)
+		return req
+	}
+	newUpdateRequest := func() *http.Request {
+		body := strings.NewReader(`{"status": "resolved"}`)
+		req := httptest.NewRequest(http.MethodPatch, "/tickets/"+validTicketID, body)
+		req.SetPathValue("id", validTicketID)
+		return req
+	}
+
+	tests := []struct {
+		name        string
+		handler     func(h *TicketHandler) http.HandlerFunc
+		newRequest  func() *http.Request
+		serviceErr  error
+		wantStatus  int
+		wantMessage string
+		// wantID is true for the endpoints that pass the path ID to the service.
+		wantID bool
+	}{
+		{
+			name:        "Create/unexpected error",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.Create },
+			newRequest:  newCreateRequest,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to create ticket",
+		},
+		{
+			name:        "List/unexpected error",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.List },
+			newRequest:  newListRequest,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to list tickets",
+		},
+		{
+			name:        "GetByID/ticket not found",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.GetByID },
+			newRequest:  newGetRequest,
+			serviceErr:  notFound,
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "ticket not found",
+			wantID:      true,
+		},
+		{
+			name:        "GetByID/unexpected error",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.GetByID },
+			newRequest:  newGetRequest,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to get ticket",
+			wantID:      true,
+		},
+		{
+			// Same text as ErrTicketNotFound but a different error value:
+			// only the sentinel itself may become a 404.
+			name:        "GetByID/error with the same text is not a 404",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.GetByID },
+			newRequest:  newGetRequest,
+			serviceErr:  errors.New("ticket not found"),
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to get ticket",
+			wantID:      true,
+		},
+		{
+			name:        "UpdateStatus/ticket not found",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.UpdateStatus },
+			newRequest:  newUpdateRequest,
+			serviceErr:  fmt.Errorf("failed to update ticket status: %w", repositories.ErrTicketNotFound),
+			wantStatus:  http.StatusNotFound,
+			wantMessage: "ticket not found",
+			wantID:      true,
+		},
+		{
+			name:        "UpdateStatus/unexpected error",
+			handler:     func(h *TicketHandler) http.HandlerFunc { return h.UpdateStatus },
+			newRequest:  newUpdateRequest,
+			serviceErr:  unexpected,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: "failed to update ticket status",
+			wantID:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeTicketService{err: tt.serviceErr}
+			handler := NewTicketHandler(service)
+
+			// serve fails the test if the handler panics on the error.
+			rec := serve(t, tt.handler(handler), tt.newRequest())
+
+			// The exact message also shows the internal error text is not
+			// leaked to the client.
+			assertErrorResponse(t, rec, tt.wantStatus, tt.wantMessage)
+
+			if service.calls != 1 {
+				t.Errorf("service calls = %d, want 1", service.calls)
+			}
+
+			if tt.wantID && service.gotID.String() != validTicketID {
+				t.Errorf("service got ticket ID %q, want %q", service.gotID, validTicketID)
+			}
+		})
 	}
 }

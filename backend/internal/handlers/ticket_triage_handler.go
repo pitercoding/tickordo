@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,16 +9,29 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/pitercoding/tickordo/internal/models"
 	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/services"
 )
 
+// ticketTriageService lists the service methods TicketTriageHandler calls.
+// Production passes *services.TicketTriageService; tests pass a fake so they
+// can return any error without a database or OpenAI.
+type ticketTriageService interface {
+	AnalyzeTicket(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error)
+	ListTriagesByTicketID(ctx context.Context, ticketID uuid.UUID) ([]*models.TicketTriage, error)
+	GetLatestTriageByTicketID(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error)
+}
+
+// The real service must keep satisfying ticketTriageService.
+var _ ticketTriageService = (*services.TicketTriageService)(nil)
+
 type TicketTriageHandler struct {
-	service *services.TicketTriageService
+	service ticketTriageService
 }
 
 func NewTicketTriageHandler(
-	service *services.TicketTriageService,
+	service ticketTriageService,
 ) *TicketTriageHandler {
 	return &TicketTriageHandler{
 		service: service,
