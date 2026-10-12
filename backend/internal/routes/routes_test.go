@@ -134,10 +134,11 @@ func newFailingServicesMux() *http.ServeMux {
 	return mux
 }
 
-// serveMux sends req through mux and returns the recorded response. A panic
-// (for example a nil service reached because a route points to the wrong
-// handler) fails the test instead of aborting the whole test binary.
-func serveMux(t *testing.T, mux *http.ServeMux, req *http.Request) *httptest.ResponseRecorder {
+// serveMux sends req through mux (or a handler wrapping it) and returns the
+// recorded response. A panic (for example a nil service reached because a
+// route points to the wrong handler) fails the test instead of aborting the
+// whole test binary.
+func serveMux(t *testing.T, mux http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
