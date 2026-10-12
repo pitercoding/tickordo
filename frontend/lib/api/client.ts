@@ -1,4 +1,5 @@
-const API_URL = "http://localhost:8080";
+// NEXT_PUBLIC_* variables are inlined at build time; an empty value falls back to the local API.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export class ApiError extends Error {
     constructor(
