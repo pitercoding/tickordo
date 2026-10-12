@@ -168,12 +168,14 @@ func TestTicketTriageHandlerCreate_ChecksIDBeforeBody(t *testing.T) {
 
 // fakeTicketTriageService implements ticketTriageService without a database
 // or OpenAI. Every method records the call and returns err (and triages,
-// for ListTriagesByTicketID), so a test decides exactly what the handler
-// receives from the service layer.
+// for ListTriagesByTicketID, or triage, for GetLatestTriageByTicketID), so a
+// test decides exactly what the handler receives from the service layer.
 type fakeTicketTriageService struct {
 	// triages is returned by ListTriagesByTicketID.
 	triages []*models.TicketTriage
-	err     error
+	// triage is returned by GetLatestTriageByTicketID.
+	triage *models.TicketTriage
+	err    error
 
 	calls       int
 	gotTicketID uuid.UUID
@@ -194,7 +196,7 @@ func (f *fakeTicketTriageService) ListTriagesByTicketID(ctx context.Context, tic
 func (f *fakeTicketTriageService) GetLatestTriageByTicketID(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error) {
 	f.calls++
 	f.gotTicketID = ticketID
-	return nil, f.err
+	return f.triage, f.err
 }
 
 func TestTicketTriageHandler_MapsServiceErrors(t *testing.T) {
@@ -434,5 +436,55 @@ func TestTicketTriageHandlerList_ReturnsEmptyArray(t *testing.T) {
 				t.Errorf("service got ticket ID %q, want %q", service.gotTicketID, validTicketID)
 			}
 		})
+	}
+}
+
+func TestTicketTriageHandlerGetLatest_ReturnsTriage(t *testing.T) {
+	const triageID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+
+	service := &fakeTicketTriageService{
+		triage: &models.TicketTriage{
+			ID:              uuid.MustParse(triageID),
+			TicketID:        uuid.MustParse(validTicketID),
+			Category:        "authentication",
+			Priority:        "high",
+			Sentiment:       "negative",
+			SuggestedTeam:   "identity",
+			Summary:         "User cannot log in with a valid password",
+			SuggestedAction: "Reset the user's session tokens",
+			Confidence:      0.92,
+			Model:           "gpt-5",
+			CreatedAt:       time.Date(2026, 1, 3, 4, 5, 6, 0, time.UTC),
+		},
+	}
+	handler := NewTicketTriageHandler(service)
+
+	req := httptest.NewRequest(http.MethodGet, "/tickets/"+validTicketID+"/triage", nil)
+	req.SetPathValue("id", validTicketID)
+
+	rec := serve(t, handler.GetLatest, req)
+
+	// A single object, not an array: unlike List, this endpoint returns
+	// only the most recent triage.
+	assertJSONResponse(t, rec, http.StatusOK, map[string]any{
+		"id":               triageID,
+		"ticket_id":        validTicketID,
+		"category":         "authentication",
+		"priority":         "high",
+		"sentiment":        "negative",
+		"suggested_team":   "identity",
+		"summary":          "User cannot log in with a valid password",
+		"suggested_action": "Reset the user's session tokens",
+		"confidence":       0.92,
+		"model":            "gpt-5",
+		"created_at":       "2026-01-03T04:05:06Z",
+	})
+
+	if service.calls != 1 {
+		t.Errorf("service calls = %d, want 1", service.calls)
+	}
+
+	if service.gotTicketID.String() != validTicketID {
+		t.Errorf("service got ticket ID %q, want %q", service.gotTicketID, validTicketID)
 	}
 }
