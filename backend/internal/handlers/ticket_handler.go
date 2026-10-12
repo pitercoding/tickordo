@@ -121,6 +121,11 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A nil slice marshals to null; clients expect an array, even when empty.
+	if tickets == nil {
+		tickets = []models.Ticket{}
+	}
+
 	response, err := json.Marshal(tickets)
 	if err != nil {
 		log.Printf("failed to marshal tickets response: %v", err)

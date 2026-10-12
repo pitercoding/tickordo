@@ -588,7 +588,9 @@ func TestTicketHandler_AcceptsBodyAtSizeLimit(t *testing.T) {
 type fakeTicketService struct {
 	// ticket is returned by CreateTicket and GetTicketByID.
 	ticket *models.Ticket
-	err    error
+	// tickets is returned by ListTickets.
+	tickets []models.Ticket
+	err     error
 
 	calls int
 	// gotID is the ticket ID passed to GetTicketByID or UpdateTicketStatus.
@@ -609,7 +611,7 @@ func (f *fakeTicketService) CreateTicket(ctx context.Context, title string, desc
 
 func (f *fakeTicketService) ListTickets(ctx context.Context) ([]models.Ticket, error) {
 	f.calls++
-	return nil, f.err
+	return f.tickets, f.err
 }
 
 func (f *fakeTicketService) GetTicketByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error) {
@@ -751,8 +753,9 @@ func TestTicketHandler_MapsServiceErrors(t *testing.T) {
 
 // assertJSONResponse checks the status code, the JSON Content-Type and that
 // the body decodes to exactly want. Comparing generic JSON values checks the
-// field names and values the client sees, including null fields.
-func assertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, want map[string]any) {
+// field names and values the client sees, including null fields. want is a
+// map[string]any for an object or a []any for an array.
+func assertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, want any) {
 	t.Helper()
 
 	if rec.Code != wantStatus {
@@ -765,9 +768,9 @@ func assertJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, wantStatus
 
 	raw := rec.Body.String()
 
-	var body map[string]any
+	var body any
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
-		t.Fatalf("response body is not a JSON object: %v; body = %q", err, raw)
+		t.Fatalf("response body is not valid JSON: %v; body = %q", err, raw)
 	}
 
 	if !reflect.DeepEqual(body, want) {
@@ -815,6 +818,106 @@ func TestTicketHandlerGetByID_ReturnsTicket(t *testing.T) {
 
 	if service.gotID.String() != validTicketID {
 		t.Errorf("service got ticket ID %q, want %q", service.gotID, validTicketID)
+	}
+}
+
+func TestTicketHandlerList_ReturnsTickets(t *testing.T) {
+	const otherTicketID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+
+	category := "authentication"
+	priority := "high"
+
+	// Like the real repository, the fake returns the newest ticket first.
+	// The handler must keep that order and not sort the list itself.
+	service := &fakeTicketService{
+		tickets: []models.Ticket{
+			{
+				ID:                   uuid.MustParse(validTicketID),
+				Title:                "Login fails",
+				Description:          "Cannot log in with a valid password",
+				Status:               "in_progress",
+				LatestTriageCategory: &category,
+				LatestTriagePriority: &priority,
+				CreatedAt:            time.Date(2026, 1, 3, 4, 5, 6, 0, time.UTC),
+				UpdatedAt:            time.Date(2026, 1, 4, 5, 6, 7, 0, time.UTC),
+			},
+			{
+				ID:          uuid.MustParse(otherTicketID),
+				Title:       "Invoice missing",
+				Description: "The January invoice is not listed",
+				Status:      "open",
+				CreatedAt:   time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+				UpdatedAt:   time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			},
+		},
+	}
+	handler := NewTicketHandler(service)
+
+	req := httptest.NewRequest(http.MethodGet, "/tickets", nil)
+
+	rec := serve(t, handler.List, req)
+
+	assertJSONResponse(t, rec, http.StatusOK, []any{
+		map[string]any{
+			"id":                     validTicketID,
+			"title":                  "Login fails",
+			"description":            "Cannot log in with a valid password",
+			"status":                 "in_progress",
+			"latest_triage_category": "authentication",
+			"latest_triage_priority": "high",
+			"created_at":             "2026-01-03T04:05:06Z",
+			"updated_at":             "2026-01-04T05:06:07Z",
+		},
+		map[string]any{
+			"id":                     otherTicketID,
+			"title":                  "Invoice missing",
+			"description":            "The January invoice is not listed",
+			"status":                 "open",
+			"latest_triage_category": nil,
+			"latest_triage_priority": nil,
+			"created_at":             "2026-01-02T03:04:05Z",
+			"updated_at":             "2026-01-02T03:04:05Z",
+		},
+	})
+
+	if service.calls != 1 {
+		t.Errorf("service calls = %d, want 1", service.calls)
+	}
+}
+
+func TestTicketHandlerList_ReturnsEmptyArray(t *testing.T) {
+	// The real repository returns an empty, non-nil slice when there are no
+	// tickets. A nil slice would marshal to null, so the handler must turn
+	// both into [] for clients that iterate over the list.
+	tests := []struct {
+		name    string
+		tickets []models.Ticket
+	}{
+		{name: "empty slice", tickets: []models.Ticket{}},
+		{name: "nil slice", tickets: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeTicketService{tickets: tt.tickets}
+			handler := NewTicketHandler(service)
+
+			req := httptest.NewRequest(http.MethodGet, "/tickets", nil)
+
+			rec := serve(t, handler.List, req)
+
+			assertJSONResponse(t, rec, http.StatusOK, []any{})
+
+			// []any{} and nil decode differently, but check the raw body too
+			// so the contract is explicit: an empty array, never null.
+			if got := rec.Body.String(); got != "[]" {
+				t.Errorf("response body = %q, want %q", got, "[]")
+			}
+
+			if service.calls != 1 {
+				t.Errorf("service calls = %d, want 1", service.calls)
+			}
+		})
 	}
 }
 
