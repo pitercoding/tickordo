@@ -22,6 +22,26 @@ jobs:
     name: Test, vet and build
     runs-on: ubuntu-latest
 
+    # Disposable PostgreSQL used only by the repository integration tests in CI.
+    # These credentials exist only inside this ephemeral service container.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tickordo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tickordo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tickordo_test?sslmode=disable
+
     defaults:
       run:
         working-directory: backend
