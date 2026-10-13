@@ -133,10 +133,11 @@ func TestTicketHandlerCreate_RejectsInvalidRequests(t *testing.T) {
 		requiredFields  = "title and description are required"
 		titleTooLong    = "title must be at most 255 characters"
 		descriptionLong = "description must be at most 5000 characters"
+		nullCharacter   = "title and description must not contain null characters"
 	)
 
 	// Some cases pass the title checks on purpose and only break the
-	// description length (the last check before the service). Getting the
+	// description length (the last length check). Getting the
 	// description error back proves the title was accepted.
 	tooLongDescription := strings.Repeat("d", maxDescriptionLength+1)
 
@@ -328,6 +329,23 @@ func TestTicketHandlerCreate_RejectsInvalidRequests(t *testing.T) {
 				return strings.NewReader(createBody(t, "Login fails", strings.Repeat("ç", maxDescriptionLength+1)))
 			},
 			wantMessage: descriptionLong,
+		},
+
+		// NUL characters, which PostgreSQL text columns reject. The JSON
+		// body carries them as the \u0000 escape.
+		{
+			name: "title with NUL character",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(createBody(t, "Login\x00fails", "Cannot log in"))
+			},
+			wantMessage: nullCharacter,
+		},
+		{
+			name: "description with NUL character",
+			body: func(t *testing.T) io.Reader {
+				return strings.NewReader(createBody(t, "Login fails", "Cannot\x00log in"))
+			},
+			wantMessage: nullCharacter,
 		},
 	}
 

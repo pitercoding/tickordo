@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pitercoding/tickordo/internal/models"
 )
 
@@ -275,5 +276,40 @@ func TestTicketRepositoryUpdateStatusReturnsDatabaseError(t *testing.T) {
 
 	if !got.UpdatedAt.Equal(created.UpdatedAt) {
 		t.Errorf("expected updated_at %v to be unchanged, got %v", created.UpdatedAt, got.UpdatedAt)
+	}
+}
+
+func TestTicketRepositoryUpdateStatusRejectsUnknownStatus(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+	ctx := context.Background()
+
+	created := createTestTicket(t, repo, "Monitor flickering")
+
+	// "closed" fits VARCHAR(50), so only the tickets_status_check constraint
+	// (migration 003) can reject it.
+	err := repo.UpdateStatus(ctx, created.ID, "closed")
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("expected a PostgreSQL error, got %v", err)
+	}
+
+	// 23514 is check_violation.
+	if pgErr.Code != "23514" {
+		t.Errorf("expected SQLSTATE 23514, got %s", pgErr.Code)
+	}
+
+	if pgErr.ConstraintName != "tickets_status_check" {
+		t.Errorf("expected constraint tickets_status_check, got %q", pgErr.ConstraintName)
+	}
+
+	got, err := repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("failed to reload ticket: %v", err)
+	}
+
+	if got.Status != created.Status {
+		t.Errorf("expected status %q to be unchanged, got %q", created.Status, got.Status)
 	}
 }

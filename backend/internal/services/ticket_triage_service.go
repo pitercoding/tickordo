@@ -65,6 +65,9 @@ func (s *TicketTriageService) AnalyzeTicket(
 		return nil, fmt.Errorf("failed to analyze ticket: %w", err)
 	}
 
+	// Link the result to the loaded ticket instead of trusting the analyzer.
+	triage.TicketID = ticket.ID
+
 	// Generate the ID for the new triage result.
 	triage.ID = uuid.New()
 

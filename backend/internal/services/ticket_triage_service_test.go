@@ -38,6 +38,7 @@ type fakeTicketTriageRepository struct {
 	createCalls    int
 	created        *models.TicketTriage
 	createdID      uuid.UUID
+	createdTicket  uuid.UUID
 	listCalls      int
 	getLatestCalls int
 	gotTicketID    uuid.UUID
@@ -48,6 +49,7 @@ func (f *fakeTicketTriageRepository) Create(ctx context.Context, triage *models.
 	f.created = triage
 	// Copy the ID at call time to prove it was set before saving.
 	f.createdID = triage.ID
+	f.createdTicket = triage.TicketID
 	return f.err
 }
 
@@ -110,6 +112,45 @@ func TestTicketTriageServiceAnalyzeTicket_SavesAnalyzerResult(t *testing.T) {
 
 	if triage.ID != triages.createdID {
 		t.Errorf("returned triage ID = %s, want saved ID %s", triage.ID, triages.createdID)
+	}
+}
+
+func TestTicketTriageServiceAnalyzeTicket_LinksTriageToLoadedTicket(t *testing.T) {
+	tests := []struct {
+		name             string
+		analyzerTicketID uuid.UUID
+	}{
+		{name: "analyzer returns zero ticket ID", analyzerTicketID: uuid.Nil},
+		{name: "analyzer returns another ticket ID", analyzerTicketID: uuid.New()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ticket := &models.Ticket{ID: uuid.New(), Title: "Login fails", Description: "I cannot sign in."}
+
+			tickets := &fakeTicketRepository{ticket: ticket}
+			analyzer := &fakeTicketAnalyzer{triage: &models.TicketTriage{TicketID: tt.analyzerTicketID}}
+			triages := &fakeTicketTriageRepository{}
+			service := NewTicketTriageService(tickets, triages, analyzer)
+
+			triage, err := service.AnalyzeTicket(context.Background(), ticket.ID)
+			if err != nil {
+				t.Fatalf("AnalyzeTicket returned error: %v", err)
+			}
+
+			if triages.createCalls != 1 {
+				t.Fatalf("triage Create calls = %d, want 1", triages.createCalls)
+			}
+
+			// The ticket ID must be set before saving, not after.
+			if triages.createdTicket != ticket.ID {
+				t.Errorf("saved triage ticket ID = %s, want %s", triages.createdTicket, ticket.ID)
+			}
+
+			if triage.TicketID != ticket.ID {
+				t.Errorf("returned triage ticket ID = %s, want %s", triage.TicketID, ticket.ID)
+			}
+		})
 	}
 }
 

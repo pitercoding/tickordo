@@ -87,6 +87,13 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// PostgreSQL text columns cannot store the NUL character, so reject it
+	// here instead of letting the insert fail with a 500.
+	if strings.ContainsRune(request.Title, 0) || strings.ContainsRune(request.Description, 0) {
+		writeError(w, "title and description must not contain null characters", http.StatusBadRequest)
+		return
+	}
+
 	ticket, err := h.service.CreateTicket(
 		r.Context(),
 		request.Title,
