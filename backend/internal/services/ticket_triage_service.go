@@ -10,15 +10,36 @@ import (
 	"github.com/pitercoding/tickordo/internal/repositories"
 )
 
+// ticketGetter lists the ticket repository method TicketTriageService calls.
+// Production passes *repositories.TicketRepository; tests pass a fake.
+type ticketGetter interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error)
+}
+
+// ticketTriageRepository lists the triage repository methods
+// TicketTriageService calls. Production passes
+// *repositories.TicketTriageRepository; tests pass a fake.
+type ticketTriageRepository interface {
+	Create(ctx context.Context, triage *models.TicketTriage) error
+	ListByTicketID(ctx context.Context, ticketID uuid.UUID) ([]*models.TicketTriage, error)
+	GetLatestByTicketID(ctx context.Context, ticketID uuid.UUID) (*models.TicketTriage, error)
+}
+
+// The real repositories must keep satisfying these interfaces.
+var (
+	_ ticketGetter           = (*repositories.TicketRepository)(nil)
+	_ ticketTriageRepository = (*repositories.TicketTriageRepository)(nil)
+)
+
 type TicketTriageService struct {
-	ticketRepository *repositories.TicketRepository
-	triageRepository *repositories.TicketTriageRepository
+	ticketRepository ticketGetter
+	triageRepository ticketTriageRepository
 	analyzer         ai.TicketAnalyzer
 }
 
 func NewTicketTriageService(
-	ticketRepository *repositories.TicketRepository,
-	triageRepository *repositories.TicketTriageRepository,
+	ticketRepository ticketGetter,
+	triageRepository ticketTriageRepository,
 	analyzer ai.TicketAnalyzer,
 ) *TicketTriageService {
 	return &TicketTriageService{

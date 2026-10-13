@@ -9,11 +9,24 @@ import (
 	"github.com/pitercoding/tickordo/internal/repositories"
 )
 
-type TicketService struct {
-	repository *repositories.TicketRepository
+// ticketRepository lists the repository methods TicketService calls.
+// Production passes *repositories.TicketRepository; tests pass a fake so
+// they can run without a database.
+type ticketRepository interface {
+	Create(ctx context.Context, ticket *models.Ticket) error
+	List(ctx context.Context) ([]models.Ticket, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 }
 
-func NewTicketService(repository *repositories.TicketRepository) *TicketService {
+// The real repository must keep satisfying ticketRepository.
+var _ ticketRepository = (*repositories.TicketRepository)(nil)
+
+type TicketService struct {
+	repository ticketRepository
+}
+
+func NewTicketService(repository ticketRepository) *TicketService {
 	return &TicketService{
 		repository: repository,
 	}
