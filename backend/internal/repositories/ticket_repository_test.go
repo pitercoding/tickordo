@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -312,4 +313,109 @@ func TestTicketRepositoryUpdateStatusRejectsUnknownStatus(t *testing.T) {
 	if got.Status != created.Status {
 		t.Errorf("expected status %q to be unchanged, got %q", created.Status, got.Status)
 	}
+}
+
+func TestTicketRepositoryListReturnsEmptySliceWithoutTickets(t *testing.T) {
+	db := requireTestDB(t)
+	clearDashboardTables(t, db)
+	repo := NewTicketRepository(db)
+
+	got, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// A nil slice would be encoded as JSON null instead of [].
+	if got == nil {
+		t.Fatal("expected an empty slice, got nil")
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("expected no tickets, got %d", len(got))
+	}
+}
+
+func TestTicketRepositoryListUsesLatestTriageBreakingCreatedAtTiesByID(t *testing.T) {
+	db := requireTestDB(t)
+	ticketRepo := NewTicketRepository(db)
+	triageRepo := NewTicketTriageRepository(db)
+
+	at := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+	lowID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	highID := uuid.MustParse("bfffffff-ffff-ffff-ffff-ffffffffffff")
+	// The older triage has the greatest id, so ordering by id alone would
+	// wrongly pick it over the tied triages.
+	olderID := uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+	triages := map[uuid.UUID]struct {
+		category  string
+		priority  string
+		createdAt time.Time
+	}{
+		lowID:   {category: "billing", priority: "low", createdAt: at},
+		highID:  {category: "technical", priority: "critical", createdAt: at},
+		olderID: {category: "account", priority: "medium", createdAt: at.Add(-time.Microsecond)},
+	}
+
+	// Each case inserts the same triages in a different order, so insertion
+	// order cannot decide the result.
+	tests := []struct {
+		name string
+		ids  []uuid.UUID
+	}{
+		{name: "greatest tied id inserted first", ids: []uuid.UUID{highID, lowID, olderID}},
+		{name: "greatest tied id inserted last", ids: []uuid.UUID{olderID, lowID, highID}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			ticket := createTestTicket(t, ticketRepo, "Listed with tied triages: "+tt.name)
+
+			for _, id := range tt.ids {
+				triage := triages[id]
+				createTestTriage(t, triageRepo, id, ticket.ID, triage.priority, triage.createdAt)
+
+				if _, err := db.Exec(ctx, "UPDATE ticket_triages SET category = $1 WHERE id = $2", triage.category, id); err != nil {
+					t.Fatalf("failed to set triage category: %v", err)
+				}
+			}
+
+			tickets, err := ticketRepo.List(ctx)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			var got *models.Ticket
+			for i := range tickets {
+				if tickets[i].ID == ticket.ID {
+					got = &tickets[i]
+					break
+				}
+			}
+
+			if got == nil {
+				t.Fatalf("expected ticket %s in the list", ticket.ID)
+			}
+
+			want := triages[highID]
+
+			if got.LatestTriageCategory == nil || *got.LatestTriageCategory != want.category {
+				t.Errorf("expected latest category %q, got %v", want.category, derefString(got.LatestTriageCategory))
+			}
+
+			if got.LatestTriagePriority == nil || *got.LatestTriagePriority != want.priority {
+				t.Errorf("expected latest priority %q, got %v", want.priority, derefString(got.LatestTriagePriority))
+			}
+		})
+	}
+}
+
+// derefString formats an optional string for failure messages.
+func derefString(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+
+	return strconv.Quote(*s)
 }
