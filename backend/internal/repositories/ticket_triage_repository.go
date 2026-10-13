@@ -145,7 +145,7 @@ func (r *TicketTriageRepository) GetLatestByTicketID(
 			created_at
 		FROM ticket_triages
 		WHERE ticket_id = $1
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 		LIMIT 1
 	`
 
