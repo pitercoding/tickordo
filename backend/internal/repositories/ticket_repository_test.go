@@ -3,7 +3,9 @@ package repositories
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pitercoding/tickordo/internal/models"
@@ -92,5 +94,186 @@ func TestTicketRepositoryGetByIDReturnsTicketWithoutTriage(t *testing.T) {
 	// Both columns default to NOW(), which is fixed for the inserting transaction.
 	if !got.CreatedAt.Equal(got.UpdatedAt) {
 		t.Errorf("expected created_at and updated_at to be equal, got %v and %v", got.CreatedAt, got.UpdatedAt)
+	}
+}
+
+// createTestTicket inserts an open ticket through the repository and deletes
+// it when the test finishes, even if the test fails.
+func createTestTicket(t *testing.T, repo *TicketRepository, title string) *models.Ticket {
+	t.Helper()
+
+	ticket := &models.Ticket{
+		ID:          uuid.New(),
+		Title:       title,
+		Description: "Description for " + title,
+		Status:      "open",
+	}
+
+	if err := repo.Create(context.Background(), ticket); err != nil {
+		t.Fatalf("failed to create ticket: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if _, err := repo.db.Exec(context.Background(), "DELETE FROM tickets WHERE id = $1", ticket.ID); err != nil {
+			t.Errorf("failed to delete test ticket: %v", err)
+		}
+	})
+
+	return ticket
+}
+
+// databaseNow returns PostgreSQL's NOW() in its own transaction, so it can be
+// used as a bound for timestamps written by later or earlier statements.
+func databaseNow(t *testing.T, repo *TicketRepository) time.Time {
+	t.Helper()
+
+	var now time.Time
+	if err := repo.db.QueryRow(context.Background(), "SELECT NOW()").Scan(&now); err != nil {
+		t.Fatalf("failed to read database time: %v", err)
+	}
+
+	return now
+}
+
+func TestTicketRepositoryUpdateStatusUpdatesExistingTicket(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+	ctx := context.Background()
+
+	created := createTestTicket(t, repo, "VPN disconnects")
+
+	// Move both timestamps to a fixed past instant so the update is observable
+	// without sleeping or relying on clock resolution.
+	past := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(ctx, "UPDATE tickets SET created_at = $1, updated_at = $1 WHERE id = $2", past, created.ID); err != nil {
+		t.Fatalf("failed to backdate ticket: %v", err)
+	}
+
+	before := databaseNow(t, repo)
+
+	if err := repo.UpdateStatus(ctx, created.ID, "in_progress"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	after := databaseNow(t, repo)
+
+	got, err := repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("failed to reload ticket: %v", err)
+	}
+
+	if got.Status != "in_progress" {
+		t.Errorf("expected status %q, got %q", "in_progress", got.Status)
+	}
+
+	// updated_at is set to NOW() of the UPDATE's transaction, which starts
+	// between the two databaseNow calls.
+	if got.UpdatedAt.Before(before) || got.UpdatedAt.After(after) {
+		t.Errorf("expected updated_at between %v and %v, got %v", before, after, got.UpdatedAt)
+	}
+
+	if !got.CreatedAt.Equal(past) {
+		t.Errorf("expected created_at %v to be unchanged, got %v", past, got.CreatedAt)
+	}
+
+	if got.Title != created.Title {
+		t.Errorf("expected title %q, got %q", created.Title, got.Title)
+	}
+
+	if got.Description != created.Description {
+		t.Errorf("expected description %q, got %q", created.Description, got.Description)
+	}
+}
+
+func TestTicketRepositoryUpdateStatusReturnsNotFoundForUnknownID(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+
+	err := repo.UpdateStatus(context.Background(), uuid.New(), "resolved")
+
+	if !errors.Is(err, ErrTicketNotFound) {
+		t.Fatalf("expected ErrTicketNotFound, got %v", err)
+	}
+}
+
+func TestTicketRepositoryUpdateStatusOnlyAffectsTargetTicket(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+	ctx := context.Background()
+
+	target := createTestTicket(t, repo, "Email bounce")
+	other := createTestTicket(t, repo, "Monitor flickering")
+
+	if err := repo.UpdateStatus(ctx, target.ID, "resolved"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, other.ID)
+	if err != nil {
+		t.Fatalf("failed to reload other ticket: %v", err)
+	}
+
+	if got.Status != other.Status {
+		t.Errorf("expected other ticket status %q, got %q", other.Status, got.Status)
+	}
+
+	if !got.UpdatedAt.Equal(other.UpdatedAt) {
+		t.Errorf("expected other ticket updated_at %v, got %v", other.UpdatedAt, got.UpdatedAt)
+	}
+}
+
+func TestTicketRepositoryUpdateStatusSucceedsWithSameStatus(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+	ctx := context.Background()
+
+	created := createTestTicket(t, repo, "Keyboard missing keys")
+
+	// PostgreSQL reports matched rows, not changed rows, so re-applying the
+	// current status must not be mistaken for a missing ticket.
+	if err := repo.UpdateStatus(ctx, created.ID, created.Status); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("failed to reload ticket: %v", err)
+	}
+
+	if got.Status != created.Status {
+		t.Errorf("expected status %q, got %q", created.Status, got.Status)
+	}
+}
+
+func TestTicketRepositoryUpdateStatusReturnsDatabaseError(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+	ctx := context.Background()
+
+	created := createTestTicket(t, repo, "Laptop overheating")
+
+	// status is VARCHAR(50); the repository does not validate it, so the
+	// database rejects the value.
+	err := repo.UpdateStatus(ctx, created.ID, strings.Repeat("x", 51))
+
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+
+	if errors.Is(err, ErrTicketNotFound) {
+		t.Fatalf("expected a database error, got ErrTicketNotFound")
+	}
+
+	got, err := repo.GetByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("failed to reload ticket: %v", err)
+	}
+
+	if got.Status != created.Status {
+		t.Errorf("expected status %q to be unchanged, got %q", created.Status, got.Status)
+	}
+
+	if !got.UpdatedAt.Equal(created.UpdatedAt) {
+		t.Errorf("expected updated_at %v to be unchanged, got %v", created.UpdatedAt, got.UpdatedAt)
 	}
 }
