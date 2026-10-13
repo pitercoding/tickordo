@@ -15,6 +15,7 @@ import (
 const (
 	testDatabaseURLEnv = "TEST_DATABASE_URL"
 	testDatabaseName   = "tickordo_test"
+	ciEnv              = "CI"
 )
 
 // testDB is the shared pool used by integration tests. It is nil when
@@ -28,6 +29,11 @@ func TestMain(m *testing.M) {
 func runTests(m *testing.M) int {
 	databaseURL := os.Getenv(testDatabaseURLEnv)
 	if databaseURL == "" {
+		if err := checkMissingTestDatabaseURL(os.Getenv(ciEnv)); err != nil {
+			fmt.Fprintf(os.Stderr, "integration test setup failed: %v\n", err)
+			return 1
+		}
+
 		fmt.Printf("%s is not set: skipping repository integration tests\n", testDatabaseURLEnv)
 		return m.Run()
 	}
@@ -50,6 +56,22 @@ func runTests(m *testing.M) int {
 	testDB = pool
 
 	return m.Run()
+}
+
+// checkMissingTestDatabaseURL decides what happens when TEST_DATABASE_URL is
+// not set. Locally the integration tests are skipped, but on CI (any non-empty
+// CI value) a missing database must fail the run instead of passing silently.
+func checkMissingTestDatabaseURL(ci string) error {
+	if ci == "" {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"refusing to skip repository integration tests: %s is not set but %s=%q",
+		testDatabaseURLEnv,
+		ciEnv,
+		ci,
+	)
 }
 
 // connectTestDatabase parses the URL, refuses any database other than
