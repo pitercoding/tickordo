@@ -9,6 +9,7 @@ type Config struct {
 	Port              string
 	DatabaseURL       string
 	OpenAIAPIKey      string
+	OpenAIModel       string
 	CORSAllowedOrigin string
 }
 
@@ -28,10 +29,19 @@ func Load() (Config, error) {
 		corsAllowedOrigin = "http://localhost:3000"
 	}
 
+	// Default to the model the analyzer has used so far, so existing
+	// deployments keep their behavior when OPENAI_MODEL is not set.
+	openAIModel := os.Getenv("OPENAI_MODEL")
+
+	if openAIModel == "" {
+		openAIModel = "gpt-5.6"
+	}
+
 	cfg := Config{
 		Port:              port,
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		OpenAIAPIKey:      os.Getenv("OPENAI_API_KEY"),
+		OpenAIModel:       openAIModel,
 		CORSAllowedOrigin: corsAllowedOrigin,
 	}
 

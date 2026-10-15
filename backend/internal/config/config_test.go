@@ -62,6 +62,7 @@ func TestLoad_AllVariablesSet(t *testing.T) {
 	t.Setenv("PORT", "9090")
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/test")
 	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_MODEL", "gpt-test-model")
 	t.Setenv("CORS_ALLOWED_ORIGIN", "https://app.tickordo.example")
 
 	cfg, err := Load()
@@ -73,6 +74,7 @@ func TestLoad_AllVariablesSet(t *testing.T) {
 		Port:              "9090",
 		DatabaseURL:       "postgres://test:test@localhost:5432/test",
 		OpenAIAPIKey:      "test-key",
+		OpenAIModel:       "gpt-test-model",
 		CORSAllowedOrigin: "https://app.tickordo.example",
 	}
 
@@ -109,6 +111,39 @@ func TestLoad_Port(t *testing.T) {
 
 			if cfg.Port != tt.want {
 				t.Errorf("Port = %q, want %q", cfg.Port, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_OpenAIModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		unset bool
+		value string
+		want  string
+	}{
+		{name: "unset uses default", unset: true, want: "gpt-5.6"},
+		{name: "empty uses default", value: "", want: "gpt-5.6"},
+		{name: "custom model", value: "gpt-test-model", want: "gpt-test-model"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnv(t)
+
+			t.Setenv("OPENAI_MODEL", tt.value)
+			if tt.unset {
+				os.Unsetenv("OPENAI_MODEL")
+			}
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if cfg.OpenAIModel != tt.want {
+				t.Errorf("OpenAIModel = %q, want %q", cfg.OpenAIModel, tt.want)
 			}
 		})
 	}

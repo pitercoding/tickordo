@@ -67,7 +67,7 @@ func main() {
 	openAIClient := ai.NewOpenAIClient(cfg.OpenAIAPIKey)
 
 	// Initialize the AI analyzer responsible for analyzing support tickets.
-	ticketAnalyzer := ai.NewOpenAIAnalyzer(openAIClient, "gpt-5.6")
+	ticketAnalyzer := ai.NewOpenAIAnalyzer(openAIClient, cfg.OpenAIModel)
 
 	// Initialize the ticket triage repository.
 	ticketTriageRepository := repositories.NewTicketTriageRepository(db)
