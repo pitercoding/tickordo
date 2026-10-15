@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,9 +19,12 @@ import (
 type fakeTicketRepository struct {
 	// ticket is returned by GetByID.
 	ticket *models.Ticket
-	err    error
+	// tickets is returned by List.
+	tickets []models.Ticket
+	err     error
 
 	createCalls       int
+	listCalls         int
 	created           *models.Ticket
 	getByIDCalls      int
 	updateStatusCalls int
@@ -44,7 +48,8 @@ func (f *fakeTicketRepository) Create(ctx context.Context, ticket *models.Ticket
 }
 
 func (f *fakeTicketRepository) List(ctx context.Context) ([]models.Ticket, error) {
-	return nil, f.err
+	f.listCalls++
+	return f.tickets, f.err
 }
 
 func (f *fakeTicketRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Ticket, error) {
@@ -202,5 +207,85 @@ func TestTicketService_PreservesTicketNotFound(t *testing.T) {
 
 			tt.check(t, repository)
 		})
+	}
+}
+
+func TestTicketServiceListTickets_ReturnsRepositoryTickets(t *testing.T) {
+	createdAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	want := []models.Ticket{
+		{ID: uuid.New(), Title: "Newest", Description: "Second ticket.", Status: "open", CreatedAt: createdAt.Add(time.Hour), UpdatedAt: createdAt.Add(time.Hour)},
+		{ID: uuid.New(), Title: "Oldest", Description: "First ticket.", Status: "resolved", CreatedAt: createdAt, UpdatedAt: createdAt},
+	}
+	repository := &fakeTicketRepository{tickets: want}
+	service := NewTicketService(repository)
+
+	tickets, err := service.ListTickets(context.Background())
+	if err != nil {
+		t.Fatalf("ListTickets returned error: %v", err)
+	}
+
+	if repository.listCalls != 1 {
+		t.Fatalf("repository List calls = %d, want 1", repository.listCalls)
+	}
+
+	// The repository already orders the tickets, so the service must return
+	// them unchanged and in the same order.
+	if len(tickets) != len(want) {
+		t.Fatalf("got %d tickets, want %d", len(tickets), len(want))
+	}
+
+	for i := range want {
+		if tickets[i] != want[i] {
+			t.Errorf("tickets[%d] = %+v, want %+v", i, tickets[i], want[i])
+		}
+	}
+}
+
+func TestTicketServiceListTickets_KeepsEmptySlice(t *testing.T) {
+	// The repository returns an empty, non-nil slice when there are no
+	// tickets, so the API encodes [] instead of null. The service must not
+	// turn it into nil.
+	repository := &fakeTicketRepository{tickets: []models.Ticket{}}
+	service := NewTicketService(repository)
+
+	tickets, err := service.ListTickets(context.Background())
+	if err != nil {
+		t.Fatalf("ListTickets returned error: %v", err)
+	}
+
+	if tickets == nil {
+		t.Fatal("tickets = nil, want an empty slice")
+	}
+
+	if len(tickets) != 0 {
+		t.Errorf("got %d tickets, want 0", len(tickets))
+	}
+}
+
+func TestTicketServiceListTickets_ReturnsRepositoryError(t *testing.T) {
+	repositoryErr := errors.New("connection refused")
+	repository := &fakeTicketRepository{
+		// Partial results must be discarded when the repository fails.
+		tickets: []models.Ticket{{ID: uuid.New(), Title: "Partial"}},
+		err:     repositoryErr,
+	}
+	service := NewTicketService(repository)
+
+	tickets, err := service.ListTickets(context.Background())
+
+	if !errors.Is(err, repositoryErr) {
+		t.Fatalf("error = %v, want it to wrap %v", err, repositoryErr)
+	}
+
+	if !strings.HasPrefix(err.Error(), "failed to list tickets: ") {
+		t.Errorf("error = %q, want prefix %q", err.Error(), "failed to list tickets: ")
+	}
+
+	if tickets != nil {
+		t.Errorf("tickets = %+v, want nil", tickets)
+	}
+
+	if repository.listCalls != 1 {
+		t.Errorf("repository List calls = %d, want 1", repository.listCalls)
 	}
 }
