@@ -203,3 +203,132 @@ func TestTicketTriageRepositoryCreateRejectsUnknownTicket(t *testing.T) {
 		t.Errorf("expected no triage to be saved, got %d", count)
 	}
 }
+
+func TestTicketTriageRepositoryListByTicketIDReturnsEmptySliceWithoutTriages(t *testing.T) {
+	db := requireTestDB(t)
+	ticketRepo := NewTicketRepository(db)
+	repo := NewTicketTriageRepository(db)
+
+	// The repository does not check the ticket itself, so an unknown ticket
+	// behaves like an existing ticket without triages.
+	tests := []struct {
+		name     string
+		ticketID func(t *testing.T) uuid.UUID
+	}{
+		{
+			name: "existing ticket",
+			ticketID: func(t *testing.T) uuid.UUID {
+				return createTestTicket(t, ticketRepo, "Ticket without triages").ID
+			},
+		},
+		{
+			name:     "unknown ticket",
+			ticketID: func(t *testing.T) uuid.UUID { return uuid.New() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := repo.ListByTicketID(context.Background(), tt.ticketID(t))
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			// A nil slice would be encoded as JSON null instead of [].
+			if got == nil {
+				t.Fatal("expected an empty slice, got nil")
+			}
+
+			if len(got) != 0 {
+				t.Errorf("expected no triages, got %d", len(got))
+			}
+		})
+	}
+}
+
+func TestTicketTriageRepositoryListByTicketIDReturnsOnlyRequestedTicket(t *testing.T) {
+	db := requireTestDB(t)
+	ticketRepo := NewTicketRepository(db)
+	repo := NewTicketTriageRepository(db)
+
+	base := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
+
+	ticket := createTestTicket(t, ticketRepo, "Requested ticket")
+	otherTicket := createTestTicket(t, ticketRepo, "Other ticket")
+
+	// The other ticket's triages are interleaved in time with the requested
+	// ticket's, including the newest overall, so leaking any of them would
+	// change the result.
+	oldest := createTestTriage(t, repo, uuid.New(), ticket.ID, "low", base)
+	createTestTriage(t, repo, uuid.New(), otherTicket.ID, "high", base.Add(time.Minute))
+	newest := createTestTriage(t, repo, uuid.New(), ticket.ID, "medium", base.Add(2*time.Minute))
+	createTestTriage(t, repo, uuid.New(), otherTicket.ID, "critical", base.Add(3*time.Minute))
+
+	got, err := repo.ListByTicketID(context.Background(), ticket.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	want := []*models.TicketTriage{newest, oldest}
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d triages, got %d", len(want), len(got))
+	}
+
+	for i, w := range want {
+		if got[i].ID != w.ID {
+			t.Errorf("triage %d: expected %s, got %s", i, w.ID, got[i].ID)
+		}
+
+		if got[i].TicketID != ticket.ID {
+			t.Errorf("triage %d: expected ticket %s, got %s", i, ticket.ID, got[i].TicketID)
+		}
+
+		if got[i].Priority != w.Priority {
+			t.Errorf("triage %d: expected priority %q, got %q", i, w.Priority, got[i].Priority)
+		}
+
+		if !got[i].CreatedAt.Equal(w.CreatedAt) {
+			t.Errorf("triage %d: expected created_at %v, got %v", i, w.CreatedAt, got[i].CreatedAt)
+		}
+	}
+}
+
+func TestTicketTriageRepositoryGetLatestByTicketIDReturnsNotFoundWithoutTriages(t *testing.T) {
+	db := requireTestDB(t)
+	ticketRepo := NewTicketRepository(db)
+	repo := NewTicketTriageRepository(db)
+
+	ticket := createTestTicket(t, ticketRepo, "Ticket without triages")
+
+	// Another ticket's triage must not be returned for this one.
+	otherTicket := createTestTicket(t, ticketRepo, "Analyzed ticket")
+	createTestTriage(t, repo, uuid.New(), otherTicket.ID, "high", time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC))
+
+	got, err := repo.GetLatestByTicketID(context.Background(), ticket.ID)
+
+	if !errors.Is(err, ErrTicketTriageNotFound) {
+		t.Fatalf("expected ErrTicketTriageNotFound, got %v", err)
+	}
+
+	if got != nil {
+		t.Errorf("expected nil triage, got %+v", got)
+	}
+}
+
+func TestTicketTriageRepositoryGetLatestByTicketIDReturnsTriageNotFoundForUnknownTicket(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketTriageRepository(db)
+
+	// The repository does not check the ticket itself; telling an unknown
+	// ticket apart from one without triages is TicketTriageService's job.
+	got, err := repo.GetLatestByTicketID(context.Background(), uuid.New())
+
+	if !errors.Is(err, ErrTicketTriageNotFound) {
+		t.Fatalf("expected ErrTicketTriageNotFound, got %v", err)
+	}
+
+	if got != nil {
+		t.Errorf("expected nil triage, got %+v", got)
+	}
+}

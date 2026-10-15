@@ -417,3 +417,179 @@ func TestTicketTriageServiceAnalyzeTicketDoesNotPersistRejectedTriage(t *testing
 
 	f.assertTicketUnchanged(t, ticket)
 }
+
+// createTriage inserts a triage for ticketID with a fixed created_at, so the
+// expected history order is deterministic. createTicket's cleanup removes it
+// by ticket_id before deleting the ticket.
+func (f *triageServiceFixture) createTriage(t *testing.T, ticketID uuid.UUID, priority string, createdAt time.Time) *models.TicketTriage {
+	t.Helper()
+
+	ctx := context.Background()
+
+	triage := &models.TicketTriage{
+		ID:              uuid.New(),
+		TicketID:        ticketID,
+		Category:        "technical",
+		Priority:        priority,
+		Sentiment:       "neutral",
+		SuggestedTeam:   "support",
+		Summary:         "Summary for " + priority,
+		SuggestedAction: "Action for " + priority,
+		Confidence:      0.75,
+		Model:           "test-model",
+	}
+
+	if err := f.triages.Create(ctx, triage); err != nil {
+		t.Fatalf("failed to create triage: %v", err)
+	}
+
+	if _, err := f.db.Exec(ctx, "UPDATE ticket_triages SET created_at = $1 WHERE id = $2", createdAt, triage.ID); err != nil {
+		t.Fatalf("failed to set triage created_at: %v", err)
+	}
+
+	triage.CreatedAt = createdAt
+
+	return triage
+}
+
+func TestTicketTriageServiceReadMethodsReturnNotFoundForUnknownTicket(t *testing.T) {
+	analyzer := &fakeAnalyzer{}
+	f := newTriageServiceFixture(t, analyzer)
+	ctx := context.Background()
+
+	unknownID := uuid.New()
+
+	triages, err := f.service.ListTriagesByTicketID(ctx, unknownID)
+
+	if !errors.Is(err, repositories.ErrTicketNotFound) {
+		t.Errorf("ListTriagesByTicketID: expected ErrTicketNotFound, got %v", err)
+	}
+
+	if triages != nil {
+		t.Errorf("ListTriagesByTicketID: expected nil triages, got %+v", triages)
+	}
+
+	// The triage repository alone would report ErrTicketTriageNotFound here;
+	// the service must report the missing ticket instead.
+	latest, err := f.service.GetLatestTriageByTicketID(ctx, unknownID)
+
+	if !errors.Is(err, repositories.ErrTicketNotFound) {
+		t.Errorf("GetLatestTriageByTicketID: expected ErrTicketNotFound, got %v", err)
+	}
+
+	if errors.Is(err, repositories.ErrTicketTriageNotFound) {
+		t.Errorf("GetLatestTriageByTicketID: expected no ErrTicketTriageNotFound, got %v", err)
+	}
+
+	if latest != nil {
+		t.Errorf("GetLatestTriageByTicketID: expected nil triage, got %+v", latest)
+	}
+
+	if analyzer.calls != 0 {
+		t.Errorf("expected 0 analyzer calls, got %d", analyzer.calls)
+	}
+}
+
+func TestTicketTriageServiceReadMethodsHandleTicketWithoutTriages(t *testing.T) {
+	analyzer := &fakeAnalyzer{}
+	f := newTriageServiceFixture(t, analyzer)
+	ctx := context.Background()
+
+	ticket := f.createTicket(t, "Ticket not analyzed yet")
+
+	// Another ticket's triage must not be returned for this one.
+	otherTicket := f.createTicket(t, "Analyzed ticket")
+	f.createTriage(t, otherTicket.ID, "high", time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC))
+
+	triages, err := f.service.ListTriagesByTicketID(ctx, ticket.ID)
+	if err != nil {
+		t.Fatalf("ListTriagesByTicketID: expected no error, got %v", err)
+	}
+
+	if triages == nil {
+		t.Error("ListTriagesByTicketID: expected an empty slice, got nil")
+	}
+
+	if len(triages) != 0 {
+		t.Errorf("ListTriagesByTicketID: expected no triages, got %d", len(triages))
+	}
+
+	latest, err := f.service.GetLatestTriageByTicketID(ctx, ticket.ID)
+
+	if !errors.Is(err, repositories.ErrTicketTriageNotFound) {
+		t.Errorf("GetLatestTriageByTicketID: expected ErrTicketTriageNotFound, got %v", err)
+	}
+
+	if errors.Is(err, repositories.ErrTicketNotFound) {
+		t.Errorf("GetLatestTriageByTicketID: expected no ErrTicketNotFound, got %v", err)
+	}
+
+	if latest != nil {
+		t.Errorf("GetLatestTriageByTicketID: expected nil triage, got %+v", latest)
+	}
+
+	if analyzer.calls != 0 {
+		t.Errorf("expected 0 analyzer calls, got %d", analyzer.calls)
+	}
+}
+
+func TestTicketTriageServiceReadMethodsReturnTicketHistory(t *testing.T) {
+	analyzer := &fakeAnalyzer{}
+	f := newTriageServiceFixture(t, analyzer)
+	ctx := context.Background()
+
+	base := time.Date(2024, time.March, 1, 12, 0, 0, 0, time.UTC)
+
+	ticket := f.createTicket(t, "Ticket analyzed several times")
+	otherTicket := f.createTicket(t, "Other analyzed ticket")
+
+	// Inserted out of order, with the other ticket holding the newest triage
+	// overall, so neither insertion order nor other tickets decide the result.
+	middle := f.createTriage(t, ticket.ID, "medium", base.Add(time.Minute))
+	oldest := f.createTriage(t, ticket.ID, "low", base)
+	f.createTriage(t, otherTicket.ID, "critical", base.Add(time.Hour))
+	newest := f.createTriage(t, ticket.ID, "high", base.Add(2*time.Minute))
+
+	triages, err := f.service.ListTriagesByTicketID(ctx, ticket.ID)
+	if err != nil {
+		t.Fatalf("ListTriagesByTicketID: expected no error, got %v", err)
+	}
+
+	want := []*models.TicketTriage{newest, middle, oldest}
+
+	if len(triages) != len(want) {
+		t.Fatalf("ListTriagesByTicketID: expected %d triages, got %d", len(want), len(triages))
+	}
+
+	for i, w := range want {
+		got := triages[i]
+
+		if got.ID != w.ID || got.TicketID != ticket.ID || got.Priority != w.Priority || !got.CreatedAt.Equal(w.CreatedAt) {
+			t.Errorf("ListTriagesByTicketID: triage %d: expected %+v, got %+v", i, *w, *got)
+		}
+	}
+
+	latest, err := f.service.GetLatestTriageByTicketID(ctx, ticket.ID)
+	if err != nil {
+		t.Fatalf("GetLatestTriageByTicketID: expected no error, got %v", err)
+	}
+
+	// Every field read back from PostgreSQL must match the newest triage.
+	if latest.ID != newest.ID ||
+		latest.TicketID != ticket.ID ||
+		latest.Category != newest.Category ||
+		latest.Priority != newest.Priority ||
+		latest.Sentiment != newest.Sentiment ||
+		latest.SuggestedTeam != newest.SuggestedTeam ||
+		latest.Summary != newest.Summary ||
+		latest.SuggestedAction != newest.SuggestedAction ||
+		latest.Confidence != newest.Confidence ||
+		latest.Model != newest.Model ||
+		!latest.CreatedAt.Equal(newest.CreatedAt) {
+		t.Errorf("GetLatestTriageByTicketID: expected %+v, got %+v", *newest, *latest)
+	}
+
+	if analyzer.calls != 0 {
+		t.Errorf("expected 0 analyzer calls, got %d", analyzer.calls)
+	}
+}
