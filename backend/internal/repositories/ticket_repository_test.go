@@ -419,3 +419,164 @@ func derefString(s *string) string {
 
 	return strconv.Quote(*s)
 }
+
+// findListedTicket returns the ticket with the given ID and its position in a
+// List result, or fails the test. Other tests may leave rows behind, so
+// assertions locate their own tickets instead of relying on counts.
+func findListedTicket(t *testing.T, tickets []models.Ticket, id uuid.UUID) (*models.Ticket, int) {
+	t.Helper()
+
+	for i := range tickets {
+		if tickets[i].ID == id {
+			return &tickets[i], i
+		}
+	}
+
+	t.Fatalf("expected ticket %s in the list", id)
+	return nil, -1
+}
+
+// setTicketTimestamps moves a ticket to fixed instants, so ordering and
+// mapping assertions do not depend on the clock.
+func setTicketTimestamps(t *testing.T, repo *TicketRepository, id uuid.UUID, createdAt, updatedAt time.Time) {
+	t.Helper()
+
+	if _, err := repo.db.Exec(context.Background(), "UPDATE tickets SET created_at = $1, updated_at = $2 WHERE id = $3", createdAt, updatedAt, id); err != nil {
+		t.Fatalf("failed to set ticket timestamps: %v", err)
+	}
+}
+
+func TestTicketRepositoryListOrdersTicketsByCreatedAtDescending(t *testing.T) {
+	db := requireTestDB(t)
+	repo := NewTicketRepository(db)
+
+	base := time.Date(2024, time.March, 1, 9, 0, 0, 0, time.UTC)
+
+	// Inserted middle, oldest, newest, so neither insertion order nor its
+	// reverse matches the expected order.
+	middle := createTestTicket(t, repo, "List order middle")
+	oldest := createTestTicket(t, repo, "List order oldest")
+	newest := createTestTicket(t, repo, "List order newest")
+
+	// updated_at runs opposite to created_at, so ordering by it would fail.
+	setTicketTimestamps(t, repo, oldest.ID, base, base.Add(3*time.Hour))
+	setTicketTimestamps(t, repo, middle.ID, base.Add(time.Hour), base.Add(2*time.Hour))
+	setTicketTimestamps(t, repo, newest.ID, base.Add(2*time.Hour), base.Add(time.Hour))
+
+	tickets, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	_, newestPos := findListedTicket(t, tickets, newest.ID)
+	_, middlePos := findListedTicket(t, tickets, middle.ID)
+	_, oldestPos := findListedTicket(t, tickets, oldest.ID)
+
+	if !(newestPos < middlePos && middlePos < oldestPos) {
+		t.Errorf(
+			"expected newest before middle before oldest, got positions newest=%d middle=%d oldest=%d",
+			newestPos, middlePos, oldestPos,
+		)
+	}
+}
+
+func TestTicketRepositoryListReturnsTicketWithoutTriage(t *testing.T) {
+	db := requireTestDB(t)
+	ticketRepo := NewTicketRepository(db)
+	triageRepo := NewTicketTriageRepository(db)
+
+	untriaged := createTestTicket(t, ticketRepo, "Listed without triage")
+
+	// A triaged neighbour guards against the LEFT JOIN leaking another
+	// ticket's triage into the untriaged row.
+	triaged := createTestTicket(t, ticketRepo, "Listed with triage")
+	createTestTriage(t, triageRepo, uuid.New(), triaged.ID, "high", time.Date(2024, time.March, 2, 9, 0, 0, 0, time.UTC))
+
+	tickets, err := ticketRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	got, _ := findListedTicket(t, tickets, untriaged.ID)
+
+	// No triage row means SQL NULL, which must stay nil rather than become "".
+	if got.LatestTriageCategory != nil {
+		t.Errorf("expected nil LatestTriageCategory, got %s", derefString(got.LatestTriageCategory))
+	}
+
+	if got.LatestTriagePriority != nil {
+		t.Errorf("expected nil LatestTriagePriority, got %s", derefString(got.LatestTriagePriority))
+	}
+
+	if got.Title != untriaged.Title || got.Description != untriaged.Description || got.Status != untriaged.Status {
+		t.Errorf(
+			"expected title=%q description=%q status=%q, got title=%q description=%q status=%q",
+			untriaged.Title, untriaged.Description, untriaged.Status,
+			got.Title, got.Description, got.Status,
+		)
+	}
+
+	neighbour, _ := findListedTicket(t, tickets, triaged.ID)
+
+	if neighbour.LatestTriagePriority == nil || *neighbour.LatestTriagePriority != "high" {
+		t.Errorf("expected triaged ticket priority %q, got %s", "high", derefString(neighbour.LatestTriagePriority))
+	}
+}
+
+func TestTicketRepositoryListMapsTicketAndLatestTriageFields(t *testing.T) {
+	db := requireTestDB(t)
+	ticketRepo := NewTicketRepository(db)
+	triageRepo := NewTicketTriageRepository(db)
+	ctx := context.Background()
+
+	// A non-default status catches a mapping that ignores the stored value.
+	created := createTestTicketWithStatus(t, ticketRepo, "Listed with mapped fields", "in_progress")
+
+	// Distinct instants catch created_at and updated_at being swapped.
+	createdAt := time.Date(2024, time.March, 3, 9, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2024, time.March, 4, 15, 30, 0, 0, time.UTC)
+	setTicketTimestamps(t, ticketRepo, created.ID, createdAt, updatedAt)
+
+	// Category and priority differ from each other and from createTestTriage's
+	// default category, so swapped or hardcoded columns are detected.
+	triage := createTestTriage(t, triageRepo, uuid.New(), created.ID, "critical", createdAt.Add(time.Hour))
+
+	if _, err := db.Exec(ctx, "UPDATE ticket_triages SET category = $1 WHERE id = $2", "billing", triage.ID); err != nil {
+		t.Fatalf("failed to set triage category: %v", err)
+	}
+
+	tickets, err := ticketRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	got, _ := findListedTicket(t, tickets, created.ID)
+
+	if got.Title != created.Title {
+		t.Errorf("expected title %q, got %q", created.Title, got.Title)
+	}
+
+	if got.Description != created.Description {
+		t.Errorf("expected description %q, got %q", created.Description, got.Description)
+	}
+
+	if got.Status != "in_progress" {
+		t.Errorf("expected status %q, got %q", "in_progress", got.Status)
+	}
+
+	if got.LatestTriageCategory == nil || *got.LatestTriageCategory != "billing" {
+		t.Errorf("expected latest category %q, got %s", "billing", derefString(got.LatestTriageCategory))
+	}
+
+	if got.LatestTriagePriority == nil || *got.LatestTriagePriority != "critical" {
+		t.Errorf("expected latest priority %q, got %s", "critical", derefString(got.LatestTriagePriority))
+	}
+
+	if !got.CreatedAt.Equal(createdAt) {
+		t.Errorf("expected created_at %v, got %v", createdAt, got.CreatedAt)
+	}
+
+	if !got.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("expected updated_at %v, got %v", updatedAt, got.UpdatedAt)
+	}
+}
