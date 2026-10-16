@@ -15,6 +15,7 @@ import (
 	"github.com/pitercoding/tickordo/internal/database"
 	"github.com/pitercoding/tickordo/internal/handlers"
 	"github.com/pitercoding/tickordo/internal/middleware"
+	"github.com/pitercoding/tickordo/internal/ratelimit"
 	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/routes"
 	"github.com/pitercoding/tickordo/internal/services"
@@ -91,12 +92,28 @@ func main() {
 	// Initialize the dashboard HTTP handler.
 	dashboardHandler := handlers.NewDashboardHandler(dashboardService)
 
+	// Create the ticket creation limiter once, so its counters are shared by
+	// every request for the lifetime of the process.
+	createTicketLimiter, err := ratelimit.New(cfg.TicketsRateLimit, cfg.TicketsRateWindow)
+	if err != nil {
+		log.Fatalf("failed to create ticket rate limiter: %v", err)
+	}
+
 	// Create the HTTP router.
 	mux := http.NewServeMux()
 
 	// Register all application routes.
-	routes.RegisterRoutes(mux, ticketHandler, ticketTriageHandler, dashboardHandler)
+	routes.RegisterRoutes(
+		mux,
+		ticketHandler,
+		ticketTriageHandler,
+		dashboardHandler,
+		middleware.RateLimit(createTicketLimiter, cfg.TrustedProxies),
+	)
 
+	// CORS wraps the router, so preflights are answered before reaching the
+	// rate limiter and 429 responses still carry the CORS headers.
+	//
 	// Configure the HTTP server with timeouts so slow clients cannot hold
 	// connections open forever. WriteTimeout must stay above the OpenAI
 	// analyze timeout, otherwise triage responses would be cut off.

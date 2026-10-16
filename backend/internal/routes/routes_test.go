@@ -18,6 +18,11 @@ import (
 // handler's ID check.
 const validTicketID = "550e8400-e29b-41d4-a716-446655440000"
 
+// noRateLimit leaves POST /tickets unlimited, for tests about routing only.
+func noRateLimit(next http.Handler) http.Handler {
+	return next
+}
+
 // newTestMux builds the router exactly as main does, but with nil services:
 // the requests sent to it are rejected before the service layer, so no
 // database or OpenAI client is needed.
@@ -29,6 +34,7 @@ func newTestMux() *http.ServeMux {
 		handlers.NewTicketHandler(nil),
 		handlers.NewTicketTriageHandler(nil),
 		handlers.NewDashboardHandler(nil),
+		noRateLimit,
 	)
 
 	return mux
@@ -129,6 +135,7 @@ func newFailingServicesMux() *http.ServeMux {
 		handlers.NewTicketHandler(failingTicketService{}),
 		handlers.NewTicketTriageHandler(failingTicketTriageService{}),
 		handlers.NewDashboardHandler(failingDashboardService{}),
+		noRateLimit,
 	)
 
 	return mux
