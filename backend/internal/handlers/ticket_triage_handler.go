@@ -10,9 +10,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pitercoding/tickordo/internal/models"
+	"github.com/pitercoding/tickordo/internal/ratelimit"
 	"github.com/pitercoding/tickordo/internal/repositories"
 	"github.com/pitercoding/tickordo/internal/services"
 )
+
+// busyRetryAfterSeconds is the Retry-After sent when every triage slot is in
+// use. Slots free up as analyses finish, so a short wait is enough.
+const busyRetryAfterSeconds = "5"
 
 // ticketTriageService lists the service methods TicketTriageHandler calls.
 // Production passes *services.TicketTriageService; tests pass a fake so they
@@ -60,6 +65,19 @@ func (h *TicketTriageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, repositories.ErrTicketNotFound) {
 			writeError(w, "ticket not found", http.StatusNotFound)
+			return
+		}
+
+		var quotaErr *services.QuotaExceededError
+		if errors.As(err, &quotaErr) {
+			w.Header().Set("Retry-After", ratelimit.RetryAfterSeconds(quotaErr.RetryAfter))
+			writeError(w, "triage limit reached, please try again later", http.StatusTooManyRequests)
+			return
+		}
+
+		if errors.Is(err, services.ErrTriageBusy) {
+			w.Header().Set("Retry-After", busyRetryAfterSeconds)
+			writeError(w, "triage service is busy, please try again shortly", http.StatusServiceUnavailable)
 			return
 		}
 

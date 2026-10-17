@@ -70,6 +70,20 @@ func main() {
 	// Initialize the AI analyzer responsible for analyzing support tickets.
 	ticketAnalyzer := ai.NewOpenAIAnalyzer(openAIClient, cfg.OpenAIModel)
 
+	// Create the global triage quota once, so every client shares it for
+	// the lifetime of the process.
+	triageQuota, err := ratelimit.NewGlobal(cfg.TriageGlobalLimit, cfg.TriageGlobalWindow)
+	if err != nil {
+		log.Fatalf("failed to create triage global limiter: %v", err)
+	}
+
+	// Bound OpenAI usage: limit concurrent analyses and take from the
+	// global quota before each call.
+	limitedAnalyzer, err := services.NewLimitedAnalyzer(ticketAnalyzer, triageQuota, cfg.TriageMaxConcurrent)
+	if err != nil {
+		log.Fatalf("failed to create limited ticket analyzer: %v", err)
+	}
+
 	// Initialize the ticket triage repository.
 	ticketTriageRepository := repositories.NewTicketTriageRepository(db)
 
@@ -77,7 +91,7 @@ func main() {
 	ticketTriageService := services.NewTicketTriageService(
 		ticketRepository,
 		ticketTriageRepository,
-		ticketAnalyzer,
+		limitedAnalyzer,
 	)
 
 	// Initialize the ticket triage HTTP handler.

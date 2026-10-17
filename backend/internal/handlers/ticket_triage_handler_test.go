@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pitercoding/tickordo/internal/models"
 	"github.com/pitercoding/tickordo/internal/repositories"
+	"github.com/pitercoding/tickordo/internal/services"
 )
 
 func TestTicketTriageHandler_RejectsInvalidTicketID(t *testing.T) {
@@ -308,6 +309,72 @@ func TestTicketTriageHandler_MapsServiceErrors(t *testing.T) {
 
 			if service.gotTicketID.String() != validTicketID {
 				t.Errorf("service got ticket ID %q, want %q", service.gotTicketID, validTicketID)
+			}
+		})
+	}
+}
+
+func TestTicketTriageHandlerCreate_MapsLimitErrors(t *testing.T) {
+	// The real service wraps analyzer errors with %w, so the fakes do too.
+	wrap := func(err error) error { return fmt.Errorf("failed to analyze ticket: %w", err) }
+
+	tests := []struct {
+		name           string
+		serviceErr     error
+		wantStatus     int
+		wantMessage    string
+		wantRetryAfter string
+	}{
+		{
+			name:           "quota exceeded rounds up the window",
+			serviceErr:     wrap(&services.QuotaExceededError{RetryAfter: 90*time.Minute + time.Millisecond}),
+			wantStatus:     http.StatusTooManyRequests,
+			wantMessage:    "triage limit reached, please try again later",
+			wantRetryAfter: "5401",
+		},
+		{
+			name:           "quota exceeded waits at least one second",
+			serviceErr:     wrap(&services.QuotaExceededError{RetryAfter: 0}),
+			wantStatus:     http.StatusTooManyRequests,
+			wantMessage:    "triage limit reached, please try again later",
+			wantRetryAfter: "1",
+		},
+		{
+			name:           "service busy",
+			serviceErr:     wrap(services.ErrTriageBusy),
+			wantStatus:     http.StatusServiceUnavailable,
+			wantMessage:    "triage service is busy, please try again shortly",
+			wantRetryAfter: "5",
+		},
+		{
+			// The bare sentinel carries no wait, so it is not a quota answer.
+			name:           "bare quota sentinel is an unexpected error",
+			serviceErr:     wrap(services.ErrTriageQuotaExceeded),
+			wantStatus:     http.StatusInternalServerError,
+			wantMessage:    "failed to triage ticket",
+			wantRetryAfter: "",
+		},
+		{
+			name:           "unrelated error keeps the generic answer",
+			serviceErr:     wrap(errors.New("openai timeout")),
+			wantStatus:     http.StatusInternalServerError,
+			wantMessage:    "failed to triage ticket",
+			wantRetryAfter: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewTicketTriageHandler(&fakeTicketTriageService{err: tt.serviceErr})
+			req := httptest.NewRequest(http.MethodPost, "/tickets/"+validTicketID+"/triage", nil)
+			req.SetPathValue("id", validTicketID)
+
+			rec := serve(t, handler.Create, req)
+
+			assertErrorResponse(t, rec, tt.wantStatus, tt.wantMessage)
+
+			if got := rec.Header().Get("Retry-After"); got != tt.wantRetryAfter {
+				t.Errorf("Retry-After = %q, want %q", got, tt.wantRetryAfter)
 			}
 		})
 	}

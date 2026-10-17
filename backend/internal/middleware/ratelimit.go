@@ -5,8 +5,6 @@ import (
 	"log"
 	"net/http"
 	"net/netip"
-	"strconv"
-	"time"
 
 	"github.com/pitercoding/tickordo/internal/ratelimit"
 )
@@ -46,7 +44,7 @@ func RateLimit(limiter Limiter, trusted []netip.Prefix) func(http.Handler) http.
 			}
 
 			if !decision.Allowed {
-				w.Header().Set("Retry-After", retryAfterSeconds(decision.ResetAfter))
+				w.Header().Set("Retry-After", ratelimit.RetryAfterSeconds(decision.ResetAfter))
 				writeJSONError(w, "too many requests, please try again later", http.StatusTooManyRequests)
 				return
 			}
@@ -54,18 +52,6 @@ func RateLimit(limiter Limiter, trusted []netip.Prefix) func(http.Handler) http.
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// retryAfterSeconds rounds d up to whole seconds, with a minimum of one: a
-// rejected client told to retry after 0 seconds would retry immediately and
-// be rejected again.
-func retryAfterSeconds(d time.Duration) string {
-	seconds := (d + time.Second - 1) / time.Second
-	if seconds < 1 {
-		seconds = 1
-	}
-
-	return strconv.FormatInt(int64(seconds), 10)
 }
 
 // writeJSONError sends {"error": message} with status, the same body the
