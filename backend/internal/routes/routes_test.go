@@ -18,9 +18,15 @@ import (
 // handler's ID check.
 const validTicketID = "550e8400-e29b-41d4-a716-446655440000"
 
-// noRateLimit leaves POST /tickets unlimited, for tests about routing only.
+// noRateLimit leaves a route unlimited, for tests about routing only.
 func noRateLimit(next http.Handler) http.Handler {
 	return next
+}
+
+// noRateLimits leaves every rate limited route unlimited.
+var noRateLimits = RateLimits{
+	CreateTicket: noRateLimit,
+	TriageTicket: noRateLimit,
 }
 
 // newTestMux builds the router exactly as main does, but with nil services:
@@ -34,7 +40,7 @@ func newTestMux() *http.ServeMux {
 		handlers.NewTicketHandler(nil),
 		handlers.NewTicketTriageHandler(nil),
 		handlers.NewDashboardHandler(nil),
-		noRateLimit,
+		noRateLimits,
 	)
 
 	return mux
@@ -135,7 +141,7 @@ func newFailingServicesMux() *http.ServeMux {
 		handlers.NewTicketHandler(failingTicketService{}),
 		handlers.NewTicketTriageHandler(failingTicketTriageService{}),
 		handlers.NewDashboardHandler(failingDashboardService{}),
-		noRateLimit,
+		noRateLimits,
 	)
 
 	return mux

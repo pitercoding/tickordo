@@ -99,6 +99,13 @@ func main() {
 		log.Fatalf("failed to create ticket rate limiter: %v", err)
 	}
 
+	// Create the triage limiter once as well. It is separate from the ticket
+	// creation limiter, so each route has its own quota per client.
+	triageLimiter, err := ratelimit.New(cfg.TriageRateLimit, cfg.TriageRateWindow)
+	if err != nil {
+		log.Fatalf("failed to create triage rate limiter: %v", err)
+	}
+
 	// Create the HTTP router.
 	mux := http.NewServeMux()
 
@@ -108,7 +115,10 @@ func main() {
 		ticketHandler,
 		ticketTriageHandler,
 		dashboardHandler,
-		middleware.RateLimit(createTicketLimiter, cfg.TrustedProxies),
+		routes.RateLimits{
+			CreateTicket: middleware.RateLimit(createTicketLimiter, cfg.TrustedProxies),
+			TriageTicket: middleware.RateLimit(triageLimiter, cfg.TrustedProxies),
+		},
 	)
 
 	// CORS wraps the router, so preflights are answered before reaching the
