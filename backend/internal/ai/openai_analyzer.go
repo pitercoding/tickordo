@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/respjson"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/pitercoding/tickordo/internal/models"
 )
@@ -137,6 +140,10 @@ func (a *OpenAIAnalyzer) Analyze(
 		return nil, fmt.Errorf("failed to analyze ticket with OpenAI: %w", err)
 	}
 
+	// Log usage before any check, since unusable responses are billed too.
+	// When the SDK retries, this is the final response, not every attempt.
+	logUsage(ticket, response)
+
 	// An incomplete response (e.g. token limit reached) has truncated JSON.
 	if response.Status != responses.ResponseStatusCompleted {
 		return nil, fmt.Errorf("OpenAI triage response not completed: status %q", response.Status)
@@ -169,6 +176,37 @@ func (a *OpenAIAnalyzer) Analyze(
 		Confidence:      result.Confidence,
 		Model:           a.model,
 	}, nil
+}
+
+// logUsage logs the token usage of an OpenAI response on a single line. It
+// logs only identifiers and counts, never the ticket or response content.
+func logUsage(ticket *models.Ticket, response *responses.Response) {
+	usage := response.Usage
+
+	log.Printf(
+		"openai usage: ticket_id=%s response_id=%q model=%q status=%q input_tokens=%s cached_input_tokens=%s cache_write_tokens=%s output_tokens=%s reasoning_tokens=%s total_tokens=%s",
+		ticket.ID,
+		response.ID,
+		response.Model,
+		response.Status,
+		usageCount(usage.InputTokens, usage.JSON.InputTokens),
+		usageCount(usage.InputTokensDetails.CachedTokens, usage.InputTokensDetails.JSON.CachedTokens),
+		usageCount(usage.InputTokensDetails.CacheWriteTokens, usage.InputTokensDetails.JSON.CacheWriteTokens),
+		// OutputTokens already includes ReasoningTokens; they are not summed.
+		usageCount(usage.OutputTokens, usage.JSON.OutputTokens),
+		usageCount(usage.OutputTokensDetails.ReasoningTokens, usage.OutputTokensDetails.JSON.ReasoningTokens),
+		usageCount(usage.TotalTokens, usage.JSON.TotalTokens),
+	)
+}
+
+// usageCount formats a token count, or "unknown" when the API omitted it or
+// sent null, so a missing count is never reported as zero.
+func usageCount(n int64, field respjson.Field) string {
+	if !field.Valid() {
+		return "unknown"
+	}
+
+	return strconv.FormatInt(n, 10)
 }
 
 // validate checks the fields that the JSON schema cannot fully guarantee.
