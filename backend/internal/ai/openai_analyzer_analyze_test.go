@@ -227,6 +227,11 @@ func TestOpenAIAnalyzerAnalyze_SendsStructuredOutputRequest(t *testing.T) {
 		t.Error("instructions are missing")
 	}
 
+	// JSON numbers decode as float64 into a map.
+	if body["max_output_tokens"] != float64(4096) {
+		t.Errorf("max_output_tokens = %v, want 4096", body["max_output_tokens"])
+	}
+
 	format := jsonObject(t, body, "text", "format")
 
 	if format["type"] != "json_schema" {
@@ -323,6 +328,50 @@ func TestOpenAIAnalyzerAnalyze_RejectsUnusableResponses(t *testing.T) {
 
 			if got != nil {
 				t.Errorf("Analyze() returned %+v alongside the error, want nil", got)
+			}
+		})
+	}
+}
+
+func TestOpenAIAnalyzerAnalyze_RejectsResponseCutByMaxOutputTokens(t *testing.T) {
+	validText := validTriageJSON(t, validTriageResponse())
+
+	// The token limit can stop generation mid-JSON or before any output.
+	tests := []struct {
+		name    string
+		content []map[string]any
+	}{
+		{name: "truncated JSON output", content: []map[string]any{outputText(validText[:len(validText)/2])}},
+		{name: "no output items"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]any
+			if err := json.Unmarshal(responseBody(t, "incomplete", tt.content...), &body); err != nil {
+				t.Fatalf("failed to decode response body: %v", err)
+			}
+
+			body["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
+
+			data, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("failed to marshal response body: %v", err)
+			}
+
+			analyzer, _ := newTestAnalyzer(t, respondWith(data))
+
+			got, err := analyzer.Analyze(context.Background(), testTicket())
+			if err == nil {
+				t.Fatalf("Analyze() = %+v, want an error", got)
+			}
+
+			if got != nil {
+				t.Errorf("Analyze() returned %+v alongside the error, want nil", got)
+			}
+
+			if !strings.Contains(err.Error(), "max_output_tokens") {
+				t.Errorf("error = %v, want it to mention the max_output_tokens reason", err)
 			}
 		})
 	}

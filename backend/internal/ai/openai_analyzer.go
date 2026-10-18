@@ -20,6 +20,10 @@ const (
 	// analyzeTimeout limits how long a single OpenAI triage call may take.
 	analyzeTimeout = 60 * time.Second
 
+	// maxOutputTokens caps the tokens a single triage call may generate,
+	// including reasoning tokens, to bound the cost of each response.
+	maxOutputTokens = 4096
+
 	// maxCategoryLength matches the VARCHAR(50) limit of ticket_triages.category.
 	maxCategoryLength = 50
 
@@ -119,6 +123,7 @@ func (a *OpenAIAnalyzer) Analyze(
 				"Analyze the ticket and classify it accurately. " +
 				"Return only the requested structured data.",
 		),
+		MaxOutputTokens: openai.Int(maxOutputTokens),
 		Text: responses.ResponseTextConfigParam{
 			Format: responses.ResponseFormatTextConfigUnionParam{
 				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
@@ -146,7 +151,11 @@ func (a *OpenAIAnalyzer) Analyze(
 
 	// An incomplete response (e.g. token limit reached) has truncated JSON.
 	if response.Status != responses.ResponseStatusCompleted {
-		return nil, fmt.Errorf("OpenAI triage response not completed: status %q", response.Status)
+		return nil, fmt.Errorf(
+			"OpenAI triage response not completed: status %q, reason %q",
+			response.Status,
+			response.IncompleteDetails.Reason,
+		)
 	}
 
 	// A refusal produces no output text instead of the structured data.
