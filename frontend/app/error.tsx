@@ -13,7 +13,7 @@ export default function Error({
                 </h1>
 
                 <p className="mt-2 text-sm text-slate-500">
-                    We couldn&apos;t load the Tickordo dashboard. Please try again.
+                    We couldn&apos;t load this page. Please try again.
                 </p>
 
                 <button

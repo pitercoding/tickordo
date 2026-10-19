@@ -32,11 +32,3 @@ export async function analyzeTicket(
         },
     );
 }
-
-export async function getLatestTicketTriage(
-    ticketId: string,
-): Promise<TicketTriage> {
-    return apiClient<TicketTriage>(
-        `/tickets/${encodeURIComponent(ticketId)}/triage`,
-    );
-}
