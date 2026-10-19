@@ -83,7 +83,7 @@ func newRetryTestAnalyzer(
 		option.WithHTTPClient(&http.Client{Transport: transport}),
 	)
 
-	return NewOpenAIAnalyzer(client, testModel), rs
+	return NewOpenAIAnalyzer(client, testModel, ""), rs
 }
 
 // respondError answers with an OpenAI-style JSON error and the given headers.
@@ -298,7 +298,7 @@ func TestNewOpenAIClient_ExtraOptionsCannotDisableRetries(t *testing.T) {
 		option.WithMaxRetries(0),
 	)
 
-	if _, err := NewOpenAIAnalyzer(client, testModel).Analyze(context.Background(), testTicket()); err == nil {
+	if _, err := NewOpenAIAnalyzer(client, testModel, "").Analyze(context.Background(), testTicket()); err == nil {
 		t.Fatal("Analyze() returned no error, want one")
 	}
 

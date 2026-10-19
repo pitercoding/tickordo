@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/openai/openai-go/v3/shared"
 )
 
 type Config struct {
@@ -15,6 +17,10 @@ type Config struct {
 	OpenAIAPIKey      string
 	OpenAIModel       string
 	CORSAllowedOrigin string
+
+	// Reasoning effort sent to OpenAI. Empty means the field is omitted and
+	// the model uses its own default.
+	OpenAIReasoningEffort shared.ReasoningEffort
 
 	// Per-client limit on triage requests.
 	TriageRateLimit  int
@@ -43,6 +49,18 @@ const (
 	minIPv4ProxyBits = 8
 	minIPv6ProxyBits = 32
 )
+
+// reasoningEfforts lists the OPENAI_REASONING_EFFORT values the SDK defines.
+// A model may still reject some of them; the SDK does not check that.
+var reasoningEfforts = []shared.ReasoningEffort{
+	shared.ReasoningEffortNone,
+	shared.ReasoningEffortMinimal,
+	shared.ReasoningEffortLow,
+	shared.ReasoningEffortMedium,
+	shared.ReasoningEffortHigh,
+	shared.ReasoningEffortXhigh,
+	shared.ReasoningEffortMax,
+}
 
 // ipv4MappedRange holds the IPv4-mapped IPv6 addresses. ClientIP matches IPv4
 // clients against prefixes in this range too, so they follow the IPv4 rule.
@@ -88,6 +106,13 @@ func Load() (Config, error) {
 	if cfg.OpenAIAPIKey == "" {
 		return Config{}, fmt.Errorf("missing required environment variable: OPENAI_API_KEY")
 	}
+
+	reasoningEffort, err := parseReasoningEffort(os.Getenv("OPENAI_REASONING_EFFORT"))
+	if err != nil {
+		return Config{}, err
+	}
+
+	cfg.OpenAIReasoningEffort = reasoningEffort
 
 	// Limits are optional: unset or empty uses the default, anything else
 	// must be valid so a typo fails at startup instead of during a request.
@@ -138,6 +163,31 @@ func Load() (Config, error) {
 	cfg.TrustedProxies = trustedProxies
 
 	return cfg, nil
+}
+
+// parseReasoningEffort returns the effort in value, or "" when value is empty
+// so the request keeps the model default. Unknown values fail at startup
+// instead of on every triage.
+func parseReasoningEffort(value string) (shared.ReasoningEffort, error) {
+	if value == "" {
+		return "", nil
+	}
+
+	names := make([]string, len(reasoningEfforts))
+
+	for i, effort := range reasoningEfforts {
+		if value == string(effort) {
+			return effort, nil
+		}
+
+		names[i] = string(effort)
+	}
+
+	return "", fmt.Errorf(
+		"invalid OPENAI_REASONING_EFFORT: must be one of %s, got %q",
+		strings.Join(names, ", "),
+		value,
+	)
 }
 
 // positiveIntEnv returns the positive integer in key, or fallback when key is

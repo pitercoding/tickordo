@@ -68,7 +68,7 @@ func main() {
 	openAIClient := ai.NewOpenAIClient(cfg.OpenAIAPIKey)
 
 	// Initialize the AI analyzer responsible for analyzing support tickets.
-	ticketAnalyzer := ai.NewOpenAIAnalyzer(openAIClient, cfg.OpenAIModel)
+	ticketAnalyzer := ai.NewOpenAIAnalyzer(openAIClient, cfg.OpenAIModel, cfg.OpenAIReasoningEffort)
 
 	// Create the global triage quota once, so every client shares it for
 	// the lifetime of the process.

@@ -34,6 +34,10 @@ const (
 type OpenAIAnalyzer struct {
 	client *OpenAIClient
 	model  string
+
+	// reasoningEffort is sent as reasoning.effort. Empty omits the field, so
+	// the model uses its own default.
+	reasoningEffort openai.ReasoningEffort
 }
 
 type triageResponse struct {
@@ -46,10 +50,15 @@ type triageResponse struct {
 	Confidence      float64 `json:"confidence"`
 }
 
-func NewOpenAIAnalyzer(client *OpenAIClient, model string) *OpenAIAnalyzer {
+func NewOpenAIAnalyzer(
+	client *OpenAIClient,
+	model string,
+	reasoningEffort openai.ReasoningEffort,
+) *OpenAIAnalyzer {
 	return &OpenAIAnalyzer{
-		client: client,
-		model:  model,
+		client:          client,
+		model:           model,
+		reasoningEffort: reasoningEffort,
 	}
 }
 
@@ -134,6 +143,10 @@ func (a *OpenAIAnalyzer) Analyze(
 				},
 			},
 		},
+	}
+
+	if a.reasoningEffort != "" {
+		params.Reasoning = openai.ReasoningParam{Effort: a.reasoningEffort}
 	}
 
 	// Bound the OpenAI call so a slow response cannot hang the request.

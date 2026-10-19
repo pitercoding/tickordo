@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/openai/openai-go/v3/shared"
 )
 
 // setRequiredEnv sets the variables Load requires, so each test only has to
@@ -67,6 +69,7 @@ func TestLoad_AllVariablesSet(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost:5432/test")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("OPENAI_MODEL", "gpt-test-model")
+	t.Setenv("OPENAI_REASONING_EFFORT", "low")
 	t.Setenv("CORS_ALLOWED_ORIGIN", "https://app.tickordo.example")
 	t.Setenv("RATE_LIMIT_TRIAGE_REQUESTS", "7")
 	t.Setenv("RATE_LIMIT_TRIAGE_WINDOW", "15m")
@@ -89,7 +92,9 @@ func TestLoad_AllVariablesSet(t *testing.T) {
 		OpenAIModel:       "gpt-test-model",
 		CORSAllowedOrigin: "https://app.tickordo.example",
 
-		TriageRateLimit:     7,
+		OpenAIReasoningEffort: shared.ReasoningEffortLow,
+
+		TriageRateLimit:    7,
 		TriageRateWindow:    15 * time.Minute,
 		TicketsRateLimit:    30,
 		TicketsRateWindow:   time.Hour,
@@ -168,6 +173,62 @@ func TestLoad_OpenAIModel(t *testing.T) {
 
 			if cfg.OpenAIModel != tt.want {
 				t.Errorf("OpenAIModel = %q, want %q", cfg.OpenAIModel, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_OpenAIReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name  string
+		unset bool
+		value string
+		want  shared.ReasoningEffort
+	}{
+		{name: "unset omits effort", unset: true, want: ""},
+		{name: "empty omits effort", value: "", want: ""},
+		{name: "low", value: "low", want: shared.ReasoningEffortLow},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setRequiredEnv(t)
+
+			t.Setenv("OPENAI_REASONING_EFFORT", tt.value)
+			if tt.unset {
+				os.Unsetenv("OPENAI_REASONING_EFFORT")
+			}
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if cfg.OpenAIReasoningEffort != tt.want {
+				t.Errorf("OpenAIReasoningEffort = %q, want %q", cfg.OpenAIReasoningEffort, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidOpenAIReasoningEffort(t *testing.T) {
+	// Values must match the SDK constants exactly, like the other variables.
+	invalid := []string{"turbo", "LOW", " low", "low "}
+
+	for _, value := range invalid {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("OPENAI_REASONING_EFFORT", value)
+
+			cfg, err := Load()
+
+			want := "invalid OPENAI_REASONING_EFFORT: must be one of none, minimal, low, medium, high, xhigh, max, got " + strconv.Quote(value)
+			if err == nil || err.Error() != want {
+				t.Fatalf("Load() error = %v, want %q", err, want)
+			}
+
+			if !reflect.DeepEqual(cfg, Config{}) {
+				t.Errorf("Load() config = %+v, want zero value", cfg)
 			}
 		})
 	}

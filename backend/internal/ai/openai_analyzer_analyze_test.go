@@ -75,7 +75,7 @@ func newTestAnalyzer(t *testing.T, handler http.HandlerFunc) (*OpenAIAnalyzer, *
 		),
 	}
 
-	return NewOpenAIAnalyzer(client, testModel), ts
+	return NewOpenAIAnalyzer(client, testModel, ""), ts
 }
 
 func testTicket() *models.Ticket {
@@ -279,6 +279,58 @@ func TestOpenAIAnalyzerAnalyze_SendsStructuredOutputRequest(t *testing.T) {
 		if !slices.Equal(got, sorted(want)) {
 			t.Errorf("schema.properties.%s.enum = %v, want %v", field, got, sorted(want))
 		}
+	}
+}
+
+func TestOpenAIAnalyzerAnalyze_ReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		effort openai.ReasoningEffort
+	}{
+		{name: "empty omits reasoning"},
+		{name: "low sends reasoning.effort", effort: openai.ReasoningEffortLow},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]any
+
+			analyzer, ts := newTestAnalyzer(t, func(w http.ResponseWriter, r *http.Request) {
+				data, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("failed to read request body: %v", err)
+				}
+
+				if err := json.Unmarshal(data, &body); err != nil {
+					t.Errorf("request body is not JSON: %v", err)
+				}
+
+				respondWith(responseBody(t, "completed", outputText(validTriageJSON(t, validTriageResponse()))))(w, r)
+			})
+			analyzer.reasoningEffort = tt.effort
+
+			if _, err := analyzer.Analyze(context.Background(), testTicket()); err != nil {
+				t.Fatalf("Analyze() returned unexpected error: %v", err)
+			}
+
+			if got := ts.requests.Load(); got != 1 {
+				t.Fatalf("requests = %d, want 1", got)
+			}
+
+			reasoning, sent := body["reasoning"]
+
+			if tt.effort == "" {
+				if sent {
+					t.Errorf("reasoning = %v, want the field omitted", reasoning)
+				}
+
+				return
+			}
+
+			if got := jsonObject(t, body, "reasoning"); got["effort"] != string(tt.effort) || len(got) != 1 {
+				t.Errorf("reasoning = %v, want only effort %q", got, tt.effort)
+			}
+		})
 	}
 }
 
