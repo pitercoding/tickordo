@@ -232,6 +232,11 @@ func TestOpenAIAnalyzerAnalyze_SendsStructuredOutputRequest(t *testing.T) {
 		t.Errorf("max_output_tokens = %v, want 4096", body["max_output_tokens"])
 	}
 
+	// store must be sent as false: omitting it makes OpenAI store the response.
+	if store, sent := body["store"]; !sent || store != false {
+		t.Errorf("store = %v (sent: %t), want false", store, sent)
+	}
+
 	format := jsonObject(t, body, "text", "format")
 
 	if format["type"] != "json_schema" {

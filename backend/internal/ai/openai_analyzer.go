@@ -133,6 +133,9 @@ func (a *OpenAIAnalyzer) Analyze(
 				"Return only the requested structured data.",
 		),
 		MaxOutputTokens: openai.Int(maxOutputTokens),
+		// Tickets may contain personal data, and responses are never
+		// retrieved later, so OpenAI should not store them.
+		Store: openai.Bool(false),
 		Text: responses.ResponseTextConfigParam{
 			Format: responses.ResponseFormatTextConfigUnionParam{
 				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
