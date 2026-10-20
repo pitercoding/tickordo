@@ -6,6 +6,7 @@ import { getTicket } from "@/lib/api/tickets";
 import { ApiError } from "@/lib/api/client";
 import TicketTriagePanel from "@/components/tickets/ticket-triage";
 import TicketStatusSelector from "@/components/tickets/ticket-status-selector";
+import { LocalDateTime } from "@/components/ui/local-date-time";
 
 export const metadata: Metadata = {
     title: "Ticket details",
@@ -90,7 +91,7 @@ async function TicketDetails({
                                 Created at
                             </h2>
                             <p className="mt-2 text-sm text-slate-700">
-                                {new Date(ticket.created_at).toLocaleString("en-GB")}
+                                <LocalDateTime value={ticket.created_at} />
                             </p>
                         </div>
 
@@ -99,7 +100,7 @@ async function TicketDetails({
                                 Last updated
                             </h2>
                             <p className="mt-2 text-sm text-slate-700">
-                                {new Date(ticket.updated_at).toLocaleString("en-GB")}
+                                <LocalDateTime value={ticket.updated_at} />
                             </p>
                         </div>
                     </div>

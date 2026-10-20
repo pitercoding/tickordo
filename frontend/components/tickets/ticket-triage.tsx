@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { ApiError } from "@/lib/api/client";
 import {
     analyzeTicket,
@@ -215,9 +216,7 @@ export default function TicketTriagePanel({
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
                                 Analyzed on{" "}
-                                {new Date(triage.created_at).toLocaleString(
-                                    "en-GB",
-                                )}
+                                <LocalDateTime value={triage.created_at} />
                             </p>
                         </div>
 
@@ -252,9 +251,7 @@ export default function TicketTriagePanel({
                                     {" · "}
                                     {item.category}
                                     <span className="mt-1 block text-xs font-normal text-slate-500">
-                                        {new Date(item.created_at).toLocaleString(
-                                            "en-GB",
-                                        )}
+                                        <LocalDateTime value={item.created_at} />
                                     </span>
                                 </summary>
 
