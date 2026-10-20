@@ -1,0 +1,5 @@
+# Build context allowlist for docker/migrate.Dockerfile.
+# Everything is excluded except the SQL migrations (keeps .env out of the build).
+*
+!migrations/
+!migrations/*.sql
