@@ -1,8 +1,31 @@
+import { unstable_rethrow } from "next/navigation";
+
 import { getTickets } from "@/lib/api/tickets";
 import TicketsTableClient from "./tickets-table-client";
 
 export async function TicketsTable() {
-  const tickets = await getTickets();
+  let tickets;
+
+  try {
+    tickets = await getTickets();
+  } catch (error) {
+    // Let Next.js handle its own control-flow errors, such as the rejection
+    // of fetches that are still pending when a prerender ends.
+    unstable_rethrow(error);
+
+    // Keep the cause in the server logs; the inline alert only says it failed.
+    console.error("Failed to load tickets:", error);
+
+    // Show an inline alert so a list failure doesn't take down the whole page.
+    return (
+      <div
+        className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        role="alert"
+      >
+        Unable to load tickets. Please try again later.
+      </div>
+    );
+  }
 
   return <TicketsTableClient tickets={tickets} />;
 }

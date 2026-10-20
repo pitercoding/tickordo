@@ -1,5 +1,9 @@
 import { apiClient } from "./client";
 
+// The backend gives OpenAI up to 60 seconds per analysis, so the default
+// API timeout would abort triages the server is still able to finish.
+const ANALYZE_TIMEOUT_MS = 75_000;
+
 export type TicketTriage = {
     id: string;
     ticket_id: string;
@@ -29,6 +33,7 @@ export async function analyzeTicket(
         `/tickets/${encodeURIComponent(ticketId)}/triage`,
         {
             method: "POST",
+            timeoutMs: ANALYZE_TIMEOUT_MS,
         },
     );
 }

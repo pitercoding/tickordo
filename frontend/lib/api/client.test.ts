@@ -52,6 +52,47 @@ describe("apiClient", () => {
                 );
             },
         );
+
+        it.each([
+            ["unset", undefined],
+            ["empty", ""],
+            ["blank", "   "],
+        ])(
+            "fails in production when the variable is %s",
+            async (_, apiUrl) => {
+                vi.stubEnv("NODE_ENV", "production");
+
+                await expect(loadClient(apiUrl)).rejects.toThrow(
+                    "NEXT_PUBLIC_API_URL must be set",
+                );
+            },
+        );
+
+        it("uses the configured URL in production", async () => {
+            vi.stubEnv("NODE_ENV", "production");
+            const { apiClient } = await loadClient("https://api.example.com");
+            fetchMock.mockResolvedValue(jsonResponse([]));
+
+            await apiClient("/tickets");
+
+            expect(fetchMock.mock.calls[0][0]).toBe(
+                "https://api.example.com/tickets",
+            );
+        });
+
+        it.each([
+            ["one trailing slash", "https://api.example.com/"],
+            ["several trailing slashes", "https://api.example.com//"],
+        ])("removes %s from the base URL", async (_, apiUrl) => {
+            const { apiClient } = await loadClient(apiUrl);
+            fetchMock.mockResolvedValue(jsonResponse([]));
+
+            await apiClient("/tickets");
+
+            expect(fetchMock.mock.calls[0][0]).toBe(
+                "https://api.example.com/tickets",
+            );
+        });
     });
 
     describe("request options", () => {
@@ -193,6 +234,124 @@ describe("apiClient", () => {
 
             expect(error).toBe(networkError);
             expect(error).not.toBeInstanceOf(ApiError);
+        });
+
+        it("propagates a caller abort without treating it as a timeout", async () => {
+            const { apiClient, ApiTimeoutError } = await loadClient(
+                "https://api.example.com",
+            );
+            const abortError = new DOMException("Aborted", "AbortError");
+            fetchMock.mockRejectedValue(abortError);
+
+            const error = await apiClient("/tickets").catch(
+                (err: unknown) => err,
+            );
+
+            expect(error).toBe(abortError);
+            expect(error).not.toBeInstanceOf(ApiTimeoutError);
+        });
+    });
+
+    describe("timeouts", () => {
+        it("aborts requests after the default timeout", async () => {
+            const { apiClient, DEFAULT_TIMEOUT_MS } = await loadClient(
+                "https://api.example.com",
+            );
+            const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+            fetchMock.mockResolvedValue(jsonResponse([]));
+
+            await apiClient("/tickets");
+
+            expect(DEFAULT_TIMEOUT_MS).toBe(15_000);
+            expect(timeoutSpy).toHaveBeenCalledExactlyOnceWith(15_000);
+            expect(fetchMock.mock.calls[0][1]?.signal).toBe(
+                timeoutSpy.mock.results[0].value,
+            );
+        });
+
+        it("uses a custom timeout without forwarding it to fetch", async () => {
+            const { apiClient } = await loadClient("https://api.example.com");
+            const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+            fetchMock.mockResolvedValue(jsonResponse({}));
+
+            await apiClient("/tickets/1/triage", {
+                method: "POST",
+                timeoutMs: 75_000,
+            });
+
+            expect(timeoutSpy).toHaveBeenCalledExactlyOnceWith(75_000);
+            expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("timeoutMs");
+        });
+
+        it("combines a caller signal with the timeout", async () => {
+            const { apiClient } = await loadClient("https://api.example.com");
+            const controller = new AbortController();
+            fetchMock.mockResolvedValue(jsonResponse([]));
+
+            await apiClient("/tickets", { signal: controller.signal });
+
+            const signal = fetchMock.mock.calls[0][1]?.signal;
+            expect(signal).toBeInstanceOf(AbortSignal);
+            expect(signal).not.toBe(controller.signal);
+            expect(signal?.aborted).toBe(false);
+
+            controller.abort();
+
+            expect(signal?.aborted).toBe(true);
+        });
+
+        it("throws an ApiTimeoutError when the request times out", async () => {
+            const { apiClient, ApiError, ApiTimeoutError } = await loadClient(
+                "https://api.example.com",
+            );
+            fetchMock.mockRejectedValue(
+                new DOMException("The operation timed out.", "TimeoutError"),
+            );
+
+            const error = await apiClient("/tickets").catch(
+                (err: unknown) => err,
+            );
+
+            expect(error).toBeInstanceOf(ApiTimeoutError);
+            expect(error).not.toBeInstanceOf(ApiError);
+            expect(error).toMatchObject({
+                name: "ApiTimeoutError",
+                timeoutMs: 15_000,
+            });
+        });
+
+        it("throws an ApiTimeoutError when reading the body times out", async () => {
+            const { apiClient, ApiTimeoutError } = await loadClient(
+                "https://api.example.com",
+            );
+            const response = jsonResponse([]);
+            vi.spyOn(response, "json").mockRejectedValue(
+                new DOMException("The operation timed out.", "TimeoutError"),
+            );
+            fetchMock.mockResolvedValue(response);
+
+            await expect(apiClient("/tickets")).rejects.toBeInstanceOf(
+                ApiTimeoutError,
+            );
+        });
+
+        it("aborts a real request once the timeout fires", async () => {
+            const { apiClient, ApiTimeoutError } = await loadClient(
+                "https://api.example.com",
+            );
+            // Behave like fetch: reject with the signal's reason on abort.
+            fetchMock.mockImplementation(
+                (_, init) =>
+                    new Promise((_, reject) => {
+                        init?.signal?.addEventListener("abort", () =>
+                            reject(init.signal?.reason),
+                        );
+                    }),
+            );
+
+            await expect(
+                apiClient("/tickets", { timeoutMs: 10 }),
+            ).rejects.toBeInstanceOf(ApiTimeoutError);
         });
     });
 });
