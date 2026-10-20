@@ -49,3 +49,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # Production builds require an API URL (see lib/api/client.ts).
+          # CI only checks that the app compiles; this host is never called.
+          NEXT_PUBLIC_API_URL: https://api.example.invalid
+          
