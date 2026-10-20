@@ -1,5 +1,10 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { TicketForm } from "@/components/tickets/ticket-form";
+
+export const metadata: Metadata = {
+    title: "New ticket",
+};
 
 export default function NewTicketPage() {
     return (

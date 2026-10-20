@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
@@ -5,6 +6,10 @@ import { getTicket } from "@/lib/api/tickets";
 import { ApiError } from "@/lib/api/client";
 import TicketTriagePanel from "@/components/tickets/ticket-triage";
 import TicketStatusSelector from "@/components/tickets/ticket-status-selector";
+
+export const metadata: Metadata = {
+    title: "Ticket details",
+};
 
 type TicketDetailsPageProps = {
     params: Promise<{ id: string }>;
