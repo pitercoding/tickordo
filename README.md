@@ -98,7 +98,7 @@ Versions are taken from `backend/go.mod`, `frontend/package.json`, `frontend/pac
 | **Testing** | Go `testing` package, Vitest 4 |
 | **Linting** | ESLint 9 with `eslint-config-next`, `go vet`, `tsc --noEmit` |
 | **Migrations** | SQL migration files, [golang-migrate](https://github.com/golang-migrate/migrate) v4.20.1 via a Docker image |
-| **Infrastructure** | Docker Compose (local PostgreSQL), GitHub Actions, Vercel (frontend), Render (API) |
+| **Infrastructure** | Docker Compose (local PostgreSQL), GitHub Actions, Vercel (frontend), Render (API), Neon (database) |
 
 ## Architecture
 
@@ -386,9 +386,11 @@ Both workflows use read-only repository permissions. CI does not deploy the appl
 | --- | --- | --- |
 | Frontend | Vercel | `NEXT_PUBLIC_API_URL` set to the Render API URL. Because the variable is inlined at build time, changing it requires a new build |
 | API | Render (free tier) | `DATABASE_URL`, `OPENAI_API_KEY`, and `CORS_ALLOWED_ORIGIN` set to the Vercel origin; optional model, rate limit, and proxy settings as listed in [Environment variables](#environment-variables) |
-| Database | Hosted PostgreSQL | Schema applied manually with the migration runner |
+| Database | Neon (free plan) | Serverless PostgreSQL. Use the **direct** connection string (host without `-pooler`) with `sslmode=require`, and omit `channel_binding`, which pgx does not support. Schema applied manually with the migration runner |
 
-Deployment settings live in the Vercel and Render dashboards; the repository does not contain platform-specific deployment files. Secrets are configured as environment variables in each platform and are never committed.
+The database was originally hosted on Render's free PostgreSQL, which expires after 30 days, so it was moved to Neon's free plan. The API still runs on Render.
+
+Deployment settings live in the Vercel, Render, and Neon dashboards; the repository does not contain platform-specific deployment files. Secrets are configured as environment variables in each platform and are never committed.
 
 Production migrations are run manually by the operator with the migration image, passing the production `DATABASE_URL` from the local shell environment (for example, check the current version first with `version` before running `up`). They are never applied automatically.
 
@@ -448,7 +450,7 @@ All endpoints are public (no authentication). Responses are JSON; errors use `{"
 - **In-memory limits**: rate limits, the global triage quota, and concurrency slots reset on restart and are per process.
 - **Client-side list operations**: `GET /tickets` returns every ticket, and search, filtering, sorting, and pagination are done in the browser. This is fine for a demo dataset but would not scale to large volumes.
 - **No ticket editing or deletion**: only the status of a ticket can be changed after creation.
-- **Cold starts**: the API runs on Render's free tier, so the first request after an idle period can be slow.
+- **Cold starts**: the API runs on Render's free tier and the database on Neon's free plan, which suspends its compute when idle, so the first request after an idle period can be slow.
 
 ## Project status
 
